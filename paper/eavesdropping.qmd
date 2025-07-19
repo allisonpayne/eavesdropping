@@ -1,0 +1,108 @@
+# Eavesdropping on the eavesdroppers
+
+### Setup
+
+```{r}
+library(ggOceanMaps)
+library(terra)
+library(tidyverse)
+library(tidyterra)
+theme_set(theme_bw())
+```
+
+### Data
+
+```{r}
+locs <- read_csv(here::here("data/seal_locations.csv"), 
+                 show_col_types = FALSE)
+acou <- read_csv(here::here("data/acoustic-explore.csv"),
+                 show_col_types = FALSE)
+dive <- read_csv(here::here("data/23A1302/out-Archive.csv"), 
+                 show_col_types = FALSE)
+```
+
+### Dive type figures
+
+```{r}
+acou %>% 
+  mutate(divetype = toupper(divetype)) %>% 
+  filter(is.na(divetype) == FALSE) %>% 
+  ggplot(aes(divetype)) + 
+  geom_bar() + 
+  xlab("Dive Type") + 
+  ylab("Count")
+```
+
+```{r}
+acou %>% 
+  mutate(divetype = toupper(divetype)) %>% 
+  filter(is.na(divetype) == FALSE) %>% 
+  ggplot(aes(divetype, fill = factor(odontocetes))) + 
+  geom_bar() + 
+  scale_fill_manual(values = c("#8fa9df", "#fbe095")) + 
+  xlab("Dive Type") + 
+  ylab("Count") + 
+  guides(fill = guide_legend(title = "Odontocetes"))
+
+acou %>% 
+  mutate(divetype = toupper(divetype)) %>% 
+  filter(is.na(divetype) == FALSE) %>% 
+  ggplot(aes(divetype, fill = factor(odontocetes))) + 
+           geom_bar(position = "fill") + 
+  scale_fill_manual(values = c("#8fa9df", "#fbe095")) + 
+           xlab("Dive Type") + 
+           ylab("Count") + 
+    guides(fill = guide_legend(title = "Odontocetes"))
+
+```
+
+### Mapping
+
+```{r}
+page_start <- as.POSIXct("2025-02-21 06:00", tz = "US/Pacific")
+window_hr <- 24
+find_window <- function(time, start, win_hr) {
+  n_window <- as.numeric(time - start, unit = "hours") %/% win_hr
+  start + n_window * window_hr * 3600 + window_hr / 2 * 3600
+}
+acou_agg <- acou %>% 
+  mutate(time = page_start + (page - 1) * 3600,
+         window = find_window(time, page_start, window_hr)) %>% 
+  group_by(window) %>% 
+  summarize(n_odon = sum(odontocetes))
+locs_agg <- locs %>% 
+  mutate(window = find_window(Date_es, page_start, window_hr)) %>% 
+  group_by(window) %>% 
+  summarize(across(c(Latitude, Longitude), mean))
+
+all_dat <- left_join(acou_agg, locs_agg, by = "window") %>% 
+  vect(geom = c("Longitude", "Latitude"), 
+       crs = "epsg:4326")
+track <- as.lines(all_dat)
+
+basemap(limits = c(-126, -121, 36.5, 44),
+               bathymetry = TRUE,
+               bathy.style = "rcb") +
+  geom_spatvector(data = track, color = "#8fa9df", linewidth = 1.5) +
+  geom_spatvector(aes(size = n_odon), all_dat, color = "#f1c232",
+                  alpha = 0.75) +
+  xlab("Longitude") + 
+  ylab("Latitude") +
+  theme(legend.position = "none")
+```
+
+### Step length
+
+```{r}
+steplen <- tibble(
+  n_odon = all_dat$n_odon[-nrow(all_dat)],
+  step_km = distance(all_dat[-1], 
+                     all_dat[-length(all_dat)], 
+                     pairwise = TRUE) / 1000
+)
+
+ggplot(steplen, aes(n_odon, step_km)) +
+  geom_point() + 
+  xlab("Odontocete detections") + 
+  ylab("Daily step length (km)")
+```
