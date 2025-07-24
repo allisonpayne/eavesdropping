@@ -218,4 +218,58 @@ Residuals for the three-state model:
 plotPR(hmm_3)
 ```
 
-Looks better....
+Looks better...let's add covariates.
+
+```{r}
+formula = ~ n_odon # identify covariates
+
+Par0_hmm3 <- momentuHMM::getPar0(hmm_3, formula=formula)
+
+set.seed(2023)
+hmm_trans_3 <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=3,
+            stateNames = c("Foraging", "Searching", "Transiting"),
+            dist=list(step=stepDist,angle=angleDist),
+            Par0=Par0_hmm3$Par,
+            delta0 = Par0_hmm3$delta, 
+            beta0 = Par0_hmm3$beta,
+            formula=formula, retryFits = 10)
+
+hmm_trans_3$CIbeta
+
+```
+
+Visualize:
+
+```{r}
+plot(hmm_trans_3, ask = FALSE)
+```
+
+Residuals:
+
+```{r}
+plotPR(hmm_trans_3)
+
+```
+
+Try plotting:
+
+```{r}
+statianary_est <- plotStationary(hmm_trans_3, plotCI = TRUE, return = T) # returns a list of data frames with estimated stationary state distribution and confidence intervals (useful for plotting with ggplot)
+
+# combine into long data.frame as required by ggplot
+statianary_est <- dplyr::bind_rows(statianary_est[[1]]) %>% 
+  mutate(state = rep(hmm_trans_3$stateNames, each = 101))
+
+# set colors
+colours.states <- c("#99DDB6", "#539D9C", "#312C66")
+
+# generate plot
+ggplot(statianary_est, aes(x = cov, y = est, fill = state)) + 
+  geom_ribbon(aes(ymin = est-se, ymax = est+se), alpha = 0.2) + 
+  geom_line(aes(col = state)) +
+  scale_colour_manual(values = colours.states) +
+  scale_fill_manual(values = colours.states) +
+  ylab("State Probability") + 
+  xlab("# odontocetes") +
+  theme_minimal()
+```
