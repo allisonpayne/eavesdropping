@@ -1,8 +1,6 @@
 ## Broad scale
 
-Exploring the `aniMotum` package as a way to fit a continuous HMM to the seal GPS data.
-
-I followed the installation instructions [here](https://ianjonsen.github.io/aniMotum/index.html).
+Exploring the `aniMotum` and `momentuHMM`packages as a way to fit a continuous HMM to the seal GPS data, with odontocete detections as a covariate.
 
 ```{r}
 #| label: setup
@@ -10,9 +8,7 @@ I followed the installation instructions [here](https://ianjonsen.github.io/aniM
 
 library(aniMotum)
 library(tidyverse)
-library(betareg)
 library(momentuHMM)
-library(ggOceanMaps)
 library(terra)
 library(tidyterra)
 library(amt)
@@ -43,21 +39,18 @@ fit <- fit_ssm(track,
                vmax = 3, #max travel rate 
                model = "crw", #fits correlated random walk
                time.step = 12, #12 hour steps
-               control = ssm_control(verbose = 0)) #turns off reports
-
-summary(fit)
+               control = ssm_control(verbose = 0), 
+               ) #turns off reports
 ```
 
-*Note: I chose `vmax = 3` because the example (also on elephant seals) chose that. It would be good to double check that this makes sense.*
-
-```{r}
-plot(fit, what = "predicted")
-```
+*Note: I chose `vmax = 3` because the AniMotum example (also on elephant seals) chose that. It would be good to double check that this makes sense.*
 
 Map:
 
 ```{r}
 aniMotum::map(fit, what = "p", normalise = TRUE, silent = TRUE)
+
+#TO DO: Add actual loctions back in on top
 ```
 
 Recover the regularized locations.
@@ -67,9 +60,9 @@ Recover the regularized locations.
 reg_locs <- grab(fit, what = "predicted")
 ```
 
-Now we can use `momentuHMM` to fit a two state HMM. First, we need to properly format the data. We need a single dataframe with the ID, coordinates, and covariates.
+Now we can use `momentuHMM` to fit a three state HMM. First, we need to properly format the data. We need a single dataframe with the ID, coordinates, and covariates.
 
-*See Appendix3.Rmd in the movementstats_review project for details from Florko et al. 2025.*
+*See Appendix3.Rmd in the movementstats_review project for details from Florko et al. 2025. See broad-explore-scratch.qmd to see comparisons between the two and three state HMMs with and without covariates for this project.*
 
 ```{r}
 #process acoustic data
@@ -100,97 +93,25 @@ locs_agg <- reg_locs %>%
   summarize(across(c(lat, lon), mean))
 
 dat <- left_join(acou_agg, locs_agg, by = "window") %>% 
-  mutate(date = as.POSIXct(window),
-         n_odon2 = ifelse(as.numeric(date - date[1], units = "days") < 7,
-                          0,
-                          n_odon)) 
-
-# %>% 
-#   vect(geom = c("lon", "lat"), 
-#        crs = "epsg:4326") 
+  mutate(date = as.POSIXct(window)) 
 
 dat_hmm <- dat %>% 
   mutate(ID = 1, 
          x = lon, 
          y = lat, 
-         date = date) %>% 
-  dplyr::select(ID, x, y, date, n_odon) %>% 
+         date = date,
+         scale_odon = (n_odon - mean(n_odon)) / sd(n_odon)) %>% 
+  dplyr::select(ID, x, y, date, n_odon, scale_odon) %>% 
   as.data.frame()
-  # st_as_sf(coords = c("x", "y")) %>%
-  # #this is just the CRS that Florko et al used, I should update
-  # st_set_crs("+proj=laea +lat_0=60 +lon_0=-85 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0") %>%
-  # st_transform("+proj=longlat +datum=WGS84") %>%
-  # mutate(long = unlist(map(geometry,1)),
-  #        lat = unlist(map(geometry,2))) %>% 
-  # st_drop_geometry()
 
 #Use the prepData function to calculate step length. 
 dat_hmm_prep <- momentuHMM::prepData(dat_hmm, 
                                      coordNames = c("x", "y"),
                                      type = "LL", 
-                                     covNames = c("n_odon"))
+                                     covNames = c("n_odon", "scale_odon"))
 ```
 
 Define starting parameters.
-
-```{r}
-# define parameters
-nbStates <- 2 # number of states
-stepDist <- "gamma" # step distribution
-angleDist <- "vm" # turning angle distribution
-dist <- list(step=stepDist,angle=angleDist)
-
-mu0 <- c(8, 38) # mean step length for each state
-sigma0 <- c(8, 8) # sd step length for each state
-stepPar0 <- c(mu0, sigma0)
-kappa0 <- c(0.35, 0.35)  # turning angle for each state
-```
-
-Fit the two state HMM.
-
-```{r}
-set.seed(2023)
-hmm_trans_2 <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=nbStates,
-            stateNames = c("Foraging", "Transiting"),
-            dist=dist,
-            stationary = FALSE, 
-            Par0=list(step=stepPar0,angle=kappa0),
-            retryFits = 10)
-```
-
-From their document: "As starting values can influence the model fit, it is advisable to fit the model with multiple starting values. This is what the argument `retryFits` achieves. To limit computation time of the tutorial, it is limited to 2, but a larger number could be used in a real analysis."
-
-Exploring the effects of covariates on transition probabilities.
-
-```{r}
-#define transition probaility model
-
-#identify covariates
-formula = ~ n_odon # identify covariates
-
-#retrieve parameters to define the model
-Par0_hmm_trans_2 <- momentuHMM::getPar0(hmm_trans_2, formula=formula)
-
-#fit a refined hmm with an effect of odontocetes on transition probability. 
-set.seed(2023)
-hmm_trans_2_refined <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=2,
-            stateNames = c("Foraging", "Transit"),
-            dist=list(step=stepDist,angle=angleDist),
-            Par0=Par0_hmm_trans_2$Par,
-            delta0 = Par0_hmm_trans_2$delta, 
-            beta0 = Par0_hmm_trans_2$beta,
-            formula=formula, retryFits = 2)
-
-plot(hmm_trans_2_refined, ask = FALSE)
-```
-
-It's....not great! Plot the residuals.
-
-```{r}
-plotPR(hmm_trans_2_refined)
-```
-
-Try a three state model (since our qq plots have a lot of the same issues as the model paper).
 
 ```{r}
 # define parameters
@@ -203,38 +124,26 @@ sigma0 <- c(3, 5, 8) # sd step length for each state
 stepPar0 <- c(mu0, sigma0)
 kappa0 <- c(0.35, 0.55, 0.5)  # turning angle for each state
 
-set.seed(2023)
-hmm_3 <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=nbStates,
-            stateNames = c("Foraging", "Searching", "Transiting"),
-            dist=list(step=stepDist,angle=angleDist),
-            Par0=list(step=stepPar0,angle=kappa0), retryFits = 10)
-
-plot(hmm_3, ask = FALSE)
 ```
 
-Residuals for the three-state model:
+Fit a 3 state model with covariates.
 
 ```{r}
-plotPR(hmm_3)
-```
-
-Looks better...let's add covariates.
-
-```{r}
-formula = ~ n_odon # identify covariates
-
-Par0_hmm3 <- momentuHMM::getPar0(hmm_3, formula=formula)
+formula = ~ scale_odon # identify covariates
 
 set.seed(2023)
-hmm_trans_3 <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=3,
-            stateNames = c("Foraging", "Searching", "Transiting"),
-            dist=list(step=stepDist,angle=angleDist),
-            Par0=Par0_hmm3$Par,
-            delta0 = Par0_hmm3$delta, 
-            beta0 = Par0_hmm3$beta,
-            formula=formula, retryFits = 10)
+hmm_trans_3 <- suppressWarnings(
+  momentuHMM::fitHMM(data = dat_hmm_prep, 
+                     nbStates = 3,
+                     stateNames = c("Foraging", "Searching", "Transiting"),
+                     dist = list(step = stepDist, angle = angleDist),
+                     Par0 = list(step = stepPar0, angle = kappa0),
+                     formula = formula, 
+                     optMethod = "nlm",
+                     retryFits = 10)
+)
 
-hmm_trans_3$CIbeta
+momentuHMM::CIbeta(hmm_trans_3)
 
 ```
 

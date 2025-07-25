@@ -1,0 +1,273 @@
+## Broad scale
+
+Exploring the `aniMotum` package as a way to fit a continuous HMM to the seal GPS data.
+
+I followed the installation instructions [here](https://ianjonsen.github.io/aniMotum/index.html).
+
+```{r}
+#| label: setup
+#| message: false
+
+library(aniMotum)
+library(tidyverse)
+library(momentuHMM)
+library(terra)
+library(tidyterra)
+library(amt)
+library(sf)
+
+theme_set(theme_bw())
+```
+
+Loading in our GPS data and formatting it to work with `aniMotum`:
+
+```{r}
+#| label: data
+
+track <- read_csv(here::here("data/seal_locations.csv"),
+                  show_col_types = FALSE) %>% 
+  mutate(lc = c("G"), 
+         id = c("H391")) %>% 
+  format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
+  as.data.frame()
+
+```
+
+Following Florko et al. 2025, fit a correlated random walk to filter and regularize location data at a 12 hour time step.
+
+```{r}
+
+fit <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "crw", #fits correlated random walk
+               time.step = 12, #12 hour steps
+               control = ssm_control(verbose = 0)) #turns off reports
+
+summary(fit)
+```
+
+*Note: I chose `vmax = 3` because the example (also on elephant seals) chose that. It would be good to double check that this makes sense.*
+
+```{r}
+plot(fit, what = "predicted")
+```
+
+Map:
+
+```{r}
+aniMotum::map(fit, what = "p", normalise = TRUE, silent = TRUE)
+```
+
+Recover the regularized locations.
+
+```{r}
+#extract regularized locations
+reg_locs <- grab(fit, what = "predicted")
+```
+
+Now we can use `momentuHMM` to fit a two state HMM. First, we need to properly format the data. We need a single dataframe with the ID, coordinates, and covariates.
+
+*See Appendix3.Rmd in the movementstats_review project for details from Florko et al. 2025.*
+
+```{r}
+#process acoustic data
+acou <- read_csv(here::here("data/acoustic-explore.csv"),
+                 show_col_types = FALSE) %>% 
+  drop_na(odontocetes)
+
+#this dataframe only has page numbers, not the date/time - linking pages with time
+page_start <- as.POSIXct("2025-02-21 06:00", tz = "US/Pacific")
+
+window_hr <- 12
+
+find_window <- function(time, start, win_hr) {
+  n_window <- as.numeric(time - start, unit = "hours") %/% win_hr
+  start + n_window * window_hr * 3600 + window_hr / 2 * 3600
+}
+
+acou_agg <- acou %>% 
+  mutate(time = page_start + (page - 1) * 3600,
+         window = find_window(time, page_start, window_hr)) %>% 
+  group_by(window) %>% 
+  summarize(n_odon = sum(odontocetes))
+
+#combine with location data
+locs_agg <- reg_locs %>% 
+  mutate(window = find_window(date, page_start, window_hr)) %>% 
+  group_by(window) %>% 
+  summarize(across(c(lat, lon), mean))
+
+dat <- left_join(acou_agg, locs_agg, by = "window") %>% 
+  mutate(date = as.POSIXct(window),
+         n_odon2 = ifelse(as.numeric(date - date[1], units = "days") < 7,
+                          0,
+                          n_odon)) 
+
+# %>% 
+#   vect(geom = c("lon", "lat"), 
+#        crs = "epsg:4326") 
+
+dat_hmm <- dat %>% 
+  mutate(ID = 1, 
+         x = lon, 
+         y = lat, 
+         date = date) %>% 
+  dplyr::select(ID, x, y, date, n_odon) %>% 
+  as.data.frame()
+  # st_as_sf(coords = c("x", "y")) %>%
+  # #this is just the CRS that Florko et al used, I should update
+  # st_set_crs("+proj=laea +lat_0=60 +lon_0=-85 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0") %>%
+  # st_transform("+proj=longlat +datum=WGS84") %>%
+  # mutate(long = unlist(map(geometry,1)),
+  #        lat = unlist(map(geometry,2))) %>% 
+  # st_drop_geometry()
+
+#Use the prepData function to calculate step length. 
+dat_hmm_prep <- momentuHMM::prepData(dat_hmm, 
+                                     coordNames = c("x", "y"),
+                                     type = "LL", 
+                                     covNames = c("n_odon"))
+```
+
+Define starting parameters.
+
+```{r}
+# define parameters
+nbStates <- 2 # number of states
+stepDist <- "gamma" # step distribution
+angleDist <- "vm" # turning angle distribution
+dist <- list(step=stepDist,angle=angleDist)
+
+mu0 <- c(8, 38) # mean step length for each state
+sigma0 <- c(8, 8) # sd step length for each state
+stepPar0 <- c(mu0, sigma0)
+kappa0 <- c(0.35, 0.35)  # turning angle for each state
+```
+
+Fit the two state HMM.
+
+```{r}
+set.seed(2023)
+hmm_trans_2 <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=nbStates,
+            stateNames = c("Foraging", "Transiting"),
+            dist=dist,
+            stationary = FALSE, 
+            Par0=list(step=stepPar0,angle=kappa0),
+            retryFits = 10)
+```
+
+From their document: "As starting values can influence the model fit, it is advisable to fit the model with multiple starting values. This is what the argument `retryFits` achieves. To limit computation time of the tutorial, it is limited to 2, but a larger number could be used in a real analysis."
+
+Exploring the effects of covariates on transition probabilities.
+
+```{r}
+#define transition probaility model
+
+#identify covariates
+formula = ~ n_odon # identify covariates
+
+#retrieve parameters to define the model
+Par0_hmm_trans_2 <- momentuHMM::getPar0(hmm_trans_2, formula=formula)
+
+#fit a refined hmm with an effect of odontocetes on transition probability. 
+set.seed(2023)
+hmm_trans_2_refined <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=2,
+            stateNames = c("Foraging", "Transit"),
+            dist=list(step=stepDist,angle=angleDist),
+            Par0=Par0_hmm_trans_2$Par,
+            delta0 = Par0_hmm_trans_2$delta, 
+            beta0 = Par0_hmm_trans_2$beta,
+            formula=formula, retryFits = 2)
+
+plot(hmm_trans_2_refined, ask = FALSE)
+```
+
+It's....not great! Plot the residuals.
+
+```{r}
+plotPR(hmm_trans_2_refined)
+```
+
+Try a three state model (since our qq plots have a lot of the same issues as the model paper).
+
+```{r}
+# define parameters
+nbStates <- 3 # number of states
+stepDist <- "gamma" # step distribution
+angleDist <- "vm" # turning angle distribution
+
+mu0 <- c(5, 12, 38) # mean step length for each state
+sigma0 <- c(3, 5, 8) # sd step length for each state
+stepPar0 <- c(mu0, sigma0)
+kappa0 <- c(0.35, 0.55, 0.5)  # turning angle for each state
+
+set.seed(2023)
+hmm_3 <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=nbStates,
+            stateNames = c("Foraging", "Searching", "Transiting"),
+            dist=list(step=stepDist,angle=angleDist),
+            Par0=list(step=stepPar0,angle=kappa0), retryFits = 10)
+
+plot(hmm_3, ask = FALSE)
+```
+
+Residuals for the three-state model:
+
+```{r}
+plotPR(hmm_3)
+```
+
+Looks better...let's add covariates.
+
+```{r}
+formula = ~ n_odon # identify covariates
+
+Par0_hmm3 <- momentuHMM::getPar0(hmm_3, formula=formula)
+
+set.seed(2023)
+hmm_trans_3 <- momentuHMM::fitHMM(data=dat_hmm_prep, nbStates=3,
+            stateNames = c("Foraging", "Searching", "Transiting"),
+            dist=list(step=stepDist,angle=angleDist),
+            Par0=Par0_hmm3$Par,
+            delta0 = Par0_hmm3$delta, 
+            beta0 = Par0_hmm3$beta,
+            formula=formula, retryFits = 10)
+
+hmm_trans_3$CIbeta
+
+```
+
+Visualize:
+
+```{r}
+plot(hmm_trans_3, ask = FALSE)
+```
+
+Residuals:
+
+```{r}
+plotPR(hmm_trans_3)
+
+```
+
+Try plotting:
+
+```{r}
+statianary_est <- plotStationary(hmm_trans_3, plotCI = TRUE, return = T) # returns a list of data frames with estimated stationary state distribution and confidence intervals (useful for plotting with ggplot)
+
+# combine into long data.frame as required by ggplot
+statianary_est <- dplyr::bind_rows(statianary_est[[1]]) %>% 
+  mutate(state = rep(hmm_trans_3$stateNames, each = 101))
+
+# set colors
+colours.states <- c("#99DDB6", "#539D9C", "#312C66")
+
+# generate plot
+ggplot(statianary_est, aes(x = cov, y = est, fill = state)) + 
+  geom_ribbon(aes(ymin = est-se, ymax = est+se), alpha = 0.2) + 
+  geom_line(aes(col = state)) +
+  scale_colour_manual(values = colours.states) +
+  scale_fill_manual(values = colours.states) +
+  ylab("State Probability") + 
+  xlab("# odontocetes") +
+  theme_minimal()
+```
