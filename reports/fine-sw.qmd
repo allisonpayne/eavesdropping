@@ -3,25 +3,39 @@ title: "fine-sw"
 format: html
 ---
 
+First, read in the dive data and split into individual dives.
+
 ```{r}
 
 library(tidyverse)
 library(zoo)
+library(gridExtra)
 
-#read in the manual annotations (SW, PWSD, and vessel noise) and filter to just SW
+depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), show_col_types = FALSE) %>%
+  drop_na(Depth) %>% 
+  mutate(Date = as.POSIXct(Time, format = "%H:%M:%S %d-%b-%Y", tz = "UTC")) %>% 
+  rename(no_zoc_depth = Depth,
+         Depth = `Corrected Depth`)
 
-manual <- read.csv("data/sw/sw-manual.csv") %>% 
-  filter(species == "SW")
+dives <- get_dives(depth, 5, 80)
+
+```
+
+Next, load in the acoustic data. We have two kinds of acoustic data: manual annotations of sperm whale bouts, and triton-detected sperm whale clicks (aka, TPWS).
+
+```{r}
+#sw_comb_bouts has just sperm whales, and all nearby bouts are combined. 
+
+manual <- read.csv(here::here("data/sw_comb_bouts.csv")) 
 
 #convert times to POSIXct and add boutID
 manual <- manual %>% 
-  mutate(start = ymd_hms(start), 
-         end = ymd_hms(end), 
+  mutate(start = ymd_hms(start, tz = "UTC"), 
+         end = ymd_hms(end, tz = "UTC"), 
          bout = row_number())
 
 #read in each triton-found click with RL measurement (MPP, measured in dB)
-
-tpws <- read.csv("data/sw/tpws.csv", header = FALSE) %>% 
+tpws <- read.csv(here::here("data/sw/tpws.csv"), header = FALSE) %>% 
   rename(clicktime = V1, MPP = V2)
 
 #convert the matlab dates to UTC
@@ -40,53 +54,64 @@ tpws_val <- manual %>%
   select(bout, start, end, clicktime, MPP) %>% 
   filter(n() > 10)
 
-# #calculate the moving average
-# tpws_val <- tpws_val %>% 
-#   group_by(bout) %>% 
-#   arrange(clicktime) %>% 
-#   mutate(move_avg = rollmean(MPP, k = 10, fill = NA, align = "center")) %>% 
-#   filter(n() > 10) %>% 
-#   ungroup()
-```
-
-Plot each bout.
-
-```{r}
-ggplot(tpws_val, aes(clicktime, MPP)) + 
-  geom_point(alpha = 0.5) + 
-  geom_line(aes(y = move_avg), color = "hotpink") +
-  facet_wrap(~bout, scales = "free") + 
-  theme_bw()
-```
-
-Next, i want to adjust the plots so the lines show a 3-minute average instead of a 10 click rolling average. To do that, I will need to specify windows for each bout. It should be the start time plus 3 minutes, the next three minutes, etc etc until the endtime. Then for each window in each bout, I want to calculate the mean RL (MPP).
-
-```{r}
-
-#Can I get it to work for one bout? 
-
-window_min <- 1
-
-tpws_val <- tpws_val %>% 
-  mutate(time_elapsed = difftime(clicktime, start, units = "secs"), 
-         window = floor(as.numeric(time_elapsed / (window_min * 60))), 
+# #choose window in minutes, then create columns for the window in the data frame
+window_min <- 5
+tpws_val <- tpws_val %>%
+  mutate(time_elapsed = difftime(clicktime, start, units = "secs"),
+         window = floor(as.numeric(time_elapsed / (window_min * 60))),
          win_start = start + seconds(window * window_min * 60))
 
+# #calculate the average received level for each window
 avg_Rl <- tpws_val %>%
-  group_by(bout, win_start) %>% 
-  summarize(mean_MPP = mean(MPP, na.rm = TRUE), 
-            clicks_per_bin = n(), 
+  group_by(bout, win_start) %>%
+  summarize(mean_MPP = mean(MPP, na.rm = TRUE),
+            clicks_per_bin = n(),
             .groups = "drop")
 
+#put the window average RLs into the tpws data frame
 tpws_full <- tpws_val %>% 
   inner_join(avg_Rl, by = "win_start")
+
+#get the dive starts so that we can also calcualte mean RL for each dive
+dive_starts <- dives %>% 
+  group_by(dive_id) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(dive_id, Date)
+
+#add a column to the twps dataframe which has the associated dive ID for each detection
+tpws_full$dive_id <- findInterval(tpws_full$clicktime, dive_starts$Date)
 ```
 
-```{r}
+Calculating when the device was NOT recording audio.
 
-ggplot(tpws_full, aes(clicktime, MPP)) + 
-  geom_point(alpha = 0.5) + 
-  geom_line(aes(y = mean_MPP), color = "hotpink") +
-  facet_wrap(~bout.x, scales = "free") + 
-  theme_bw()
+```{r}
+source("R/non_recording.R")
+
+#wav_timestamps.csv is the output of the function get_wav_timestamps.R. 
+recording <- read.csv("data/wav_timestamps.csv") %>% 
+  mutate(start = ymd_hms(start_time, tz = "UTC"),
+         end = ymd_hms(end_time, tz = "UTC")) %>% 
+  drop_na(end)
+
+non_recording <- calculate_non_recording(recording)
+```
+
+Plotting the received level vs. time on top, with the dive record underneath.
+
+```{r}
+source("R/fine_plots.R")
+
+#make the plots
+bout_plots <- map(1:nrow(manual), 
+                   ~make_bout_plot(.x, tpws_full, depth, non_recording, manual)) 
+
+#save the plots to the outputs folder
+map(1:length(bout_plots),
+    ~ggsave(paste0("output/bout_plots/comb_bouts/comb_bout_plot_", .x, ".png"),
+            bout_plots[[.x]],
+            width = 10,
+            height = 3,
+            units = "in"
+    ))
 ```

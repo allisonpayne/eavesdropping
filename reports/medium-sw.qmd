@@ -29,374 +29,40 @@ ggplot(depth, aes(Date, Depth)) +
 Functions for dive summary statistics
 
 ```{r}
-#functions for getting dive stats
-get_dives <- function(depth, surface_threshold, bottom_percent) {
-  depth %>% 
-    mutate(
-      surface = Depth < surface_threshold, 
-      dive_change = surface & lag(!surface, default = TRUE), 
-      dive_id = cumsum(dive_change)
-    ) %>% 
-    filter(!surface) %>%  # Remove surface intervals
-    group_by(dive_id) %>% 
-    mutate(max_depth = max(Depth, na.rm = TRUE), 
-           bottom_thresh = max_depth * 0.80, #threshold at bottom 80% of the dive
-           at_bottom = Depth >= bottom_thresh, 
-           time_diff = as.numeric(difftime(Date, lag(Date), units = "secs")),
-           depth_change = Depth - lag(Depth),
-           direction = sign(depth_change),  # +1 = deeper, -1 = shallower
-           direction_change = direction != lag(direction)  # Wiggle detected!
-    ) %>%
-    ungroup()
-}
 
-dive_model <- function(dives, min_duration_min = 5, min_depth_m = 30) {
-  valid_dives <- dives %>% 
-    group_by(dive_id) %>% 
-    summarize(
-      start = min(Date), 
-      end = max(Date), 
-      duration_min = as.numeric(difftime(end, start, units = "mins")), 
-      max_depth = max(Depth)
-    ) %>% 
-    filter(duration_min >= min_duration_min,
-           max_depth >= min_depth_m)
+#turn the continuous dive record into individual dives and calculate summary stats for each dive. 
 
-  dive_seg <- function(.date, .depth) {
-    elapsed = as.numeric(.date - min(.date), unit = "secs")
-    depth_lm <- lm(-.depth ~ elapsed)
-    depth_seg <- segmented::segmented(depth_lm, npsi = 2)
-    bp1 <- depth_seg$psi[1, 2]
-    bp2 <- depth_seg$psi[2, 2]
-    bottom_slope <- coef(depth_seg)["elapsed"] + coef(depth_seg)["U1.elapsed"]
-    names(bottom_slope) <- NULL
-    bottom_rmse <- sqrt(mean(resid(depth_seg)[between(elapsed, bp1, bp2)]^2))
-    c(bp1_norm = bp1 / max(elapsed),
-      bp2_norm = bp2 / max(elapsed),
-      bottom_slope = bottom_slope,
-      bottom_rmse = bottom_rmse)
-  }
-  dive_summaries <- dives %>% 
-    semi_join(valid_dives, by = "dive_id") %>% 
-    group_by(dive_id) %>% 
-    summarize(dive_seg = list(dive_seg(Date, Depth))) %>% 
-    unnest_wider(dive_seg) %>% 
-    left_join(valid_dives, by = "dive_id")
-}
-
-summarize_dives <- function(dives, min_duration_min = 5) {
-  dives %>%
-    group_by(dive_id) %>%
-    summarize(
-      start = min(Date),
-      end = max(Date),
-      duration_min = as.numeric(difftime(end, start, units = "mins")),
-      max_depth = max(Depth),
-      mean_depth = mean(Depth),
-      n_records = n(),
-      bottom_duration_min = sum(at_bottom, na.rm = TRUE) * mean(time_diff, na.rm = TRUE) / 60,
-      n_bottom_wiggles = sum(at_bottom & direction_change, na.rm = TRUE),
-      wiggles_per_min = n_bottom_wiggles / pmax(bottom_duration_min, 0.01),
-      bottom_depth_range = ifelse(any(at_bottom),
-                                  max(Depth[at_bottom]) - min(Depth[at_bottom]),
-                                  NA),
-      .groups = "drop") %>%
-    filter(duration_min > min_duration_min)
-}
+source("R/dives.R")
 
 dives <- get_dives(depth, 5, 80)
-#dive_stats <- dive_model(dives)
+dive_stats <- summarize_dives(dives)
 
 ```
 
-Fit a hidden Markov model to the dives.
-
-First, unsupervised clustering of the dives to get starting parameters for the HMM observation distributions.
+Filter dives to only when we had recordings.
 
 ```{r}
-# library(vegan)
-# 
-# dive_dist <- dive_stats %>% 
-#   select(bp1_norm, bp2_norm, bottom_slope, bottom_rmse) %>% 
-#   mutate(across(everything(), \(x) (x - mean(x)) / sd(x))) %>% 
-#   vegan::vegdist(method = "euclidean")
-# dive_hclust <- hclust(dive_dist, method = "ward.D2")
-# # Assume 6 states: u-transit, v-transit, midwater foraging, drift dive, benthic
-# # foraging, benthic resting
-# dive_clust <- cutree(dive_hclust, k = 6)
-# 
-# # Calculate mean+sd for each of the 6 clusters
-# par0_data <- mutate(dive_stats, clust = dive_clust) %>% 
-#   group_by(clust) %>% 
-#   summarize(across(everything(), 
-#                    list(mean=mean, sd=sd)))
-# 
-# # Plot 25 random dives from each cluster for deciphering which is which
-# set.seed(123)
-# random_dives <- dive_stats %>% 
-#   mutate(clust = dive_clust) %>% 
-#   slice_sample(n = 25, by = clust) %>% 
-#   mutate(diverecord = map(dive_id, \(.dive_id) {
-#     dives %>% 
-#       filter(dive_id == .dive_id) %>% 
-#       transmute(time = Date, depth = Depth)
-#   })) %>% 
-#   unnest(diverecord) %>% 
-#   group_by(dive_id) %>% 
-#   mutate(elapsed = as.numeric(time - min(time), unit = "secs")) %>% 
-#   ungroup()
-# ggplot(random_dives, aes(elapsed, depth)) +
-#   geom_line(aes(group = dive_id), alpha = 0.5) +
-#   scale_y_reverse() +
-#   facet_wrap(~clust) +
-#   theme_classic()
-
-```
-
-```{r}
-# library(hmmTMB)
-# 
-# 
-# # Assume all observed variables are Gamma distributed
-# h391_dists <- as.list(rep("gamma", ncol(hmm_dive_data)))
-# names(h391_dists) <- colnames(hmm_dive_data)
-# h391_obs <- Observation$new(
-#   data = hmm_dive_data,
-#   dists = h391_dists
-# )
-# # Assume 6 states: u-transit, v-transit, midwater foraging, drift dive, benthic
-# # foraging, benthic resting
-# h391_par <- list(
-#   divetim = list(
-#     mean = c(),
-#     sd = c()
-#   ),
-#   maxdep = list(
-#     mean = c(),
-#     sd = c()
-#   ),
-#   botttim = list(
-#     mean = c(),
-#     sd = c()
-#   ),
-#   bottdep.sd = list(
-#     mean = c(),
-#     sd = c()
-#   ),
-#   asc.speed = list(
-#     mean = c(),
-#     sd = c()
-#   ),
-#   desc.speed = list(
-#     mean = c(),
-#     sd = c()
-#   )
-# )
-# h391_hmm <- MarkovChain$new(
-#   data = h391_dive_stats,
-#   n_states = 5,
-#   # no formulas parameter yet, because no covariates
-#   par = 
-# )
-```
-
-Loading the acoustic data.
-
-```{r}
-#read in the manual annotations (SW, PWSD, and vessel noise) and filter to just SW
-#sw_comb_bouts has just sperm whales, and all nearby bouts are combined. 
-
-manual <- read.csv(here::here("data/sw_comb_bouts.csv")) 
-
-#convert times to POSIXct and add boutID
-manual <- manual %>% 
-  mutate(start = ymd_hms(start, tz = "UTC"), 
-         end = ymd_hms(end, tz = "UTC"), 
-         bout = row_number())
-
-#read in each triton-found click with RL measurement (MPP, measured in dB)
-
-tpws <- read.csv(here::here("data/sw/tpws.csv"), header = FALSE) %>% 
-  rename(clicktime = V1, MPP = V2)
-
-#convert the matlab dates to UTC
-tpws <- tpws %>% 
-  mutate(clicktime = as.POSIXct((clicktime - 719529) * 86400, 
-                      origin = "1970-01-01", 
-                      tz = "UTC"))
-
-#filter tpws to only include times in the validated manual annotations
-tpws_val <- manual %>% 
-  mutate(data = map2(start, end, ~ {
-    tpws %>% 
-      filter(clicktime >= .x & clicktime <= .y)
-  })) %>% 
-  unnest(data) %>% 
-  select(bout, start, end, clicktime, MPP) %>% 
-  filter(n() > 10)
-
-#window in minutes
-window_min <- 5
-
-tpws_val <- tpws_val %>% 
-  mutate(time_elapsed = difftime(clicktime, start, units = "secs"), 
-         window = floor(as.numeric(time_elapsed / (window_min * 60))), 
-         win_start = start + seconds(window * window_min * 60))
-
-avg_Rl <- tpws_val %>%
-  group_by(bout, win_start) %>% 
-  summarize(mean_MPP = mean(MPP, na.rm = TRUE), 
-            clicks_per_bin = n(), 
-            .groups = "drop")
-
-#instead, want the mean RL of all clicks in a 5 minute bin
-
-tpws_full <- tpws_val %>% 
-  inner_join(avg_Rl, by = "win_start")
-
-dive_starts <- dives %>% 
-  group_by(dive_id) %>% 
-  slice(1) %>% 
-  ungroup() %>% 
-  select(dive_id, Date)
-
-tpws_full$dive_id <- findInterval(tpws_full$clicktime, dive_starts$Date)
-```
-
-Calculating when the device was NOT recording audio.
-
-```{r}
-
 recording <- read.csv("data/wav_timestamps.csv") %>% 
   mutate(start = ymd_hms(start_time, tz = "UTC"),
          end = ymd_hms(end_time, tz = "UTC")) %>% 
   drop_na(end)
 
-#function to find gaps between recordings
-calculate_non_recording <- function(recording_df) {
-  if(nrow(recording_df) == 0) return(tibble(gap_start = as.POSIXct(character()), 
-                                      gap_end = as.POSIXct(character())))
-  non_recording <- tibble()
-  
-#calculate gaps 
-  if(nrow(recording_df) > 1) {
-    for(i in 1:(nrow(recording_df) - 1)) {
-      if(recording_df$end[i] < recording_df$start[i + 1]) {
-        non_recording <- bind_rows(non_recording, 
-                                   tibble(gap_start = recording_df$end[i], 
-                                          gap_end = recording_df$start[i + 1]))
-      }
-    }
-  }
-  return(non_recording)
-}
+recording_start <- recording$start[1]
+recording_end <- last(recording$end)
 
-non_recording <- calculate_non_recording(recording)
+dives <- dives %>% 
+  filter(between(Date, recording_start, recording_end))
+
 ```
 
-Plotting the dive record and the RL next to each other for a single bout.
+Generate images from which to dive type.
 
 ```{r}
-#get the dives for the first bout
-bout1 <- depth %>% 
-  filter(Date >= manual$start[1], 
-         Date <= manual$end[1])
+source("R/dive_type_plots.R")
 
-tpws1 <- tpws_full %>% filter(bout.x == 1)
+#Plots were generated and saved to outputs folder 
 
-b1plot <- ggplot(bout1, aes(Date, Depth)) +
-  geom_line(linewidth = 0.3) +
-  scale_y_reverse() +
-  theme_bw()
-
-tpws1plot <- ggplot(tpws1, aes(clicktime, MPP)) + 
-  geom_boxplot(aes(group = bout.x)) +
-  geom_point(alpha = 0.5) + 
-  # geom_line(aes(y = mean_MPP), color = "hotpink") +
-  facet_wrap(~bout.x, scales = "free") + 
-  theme_bw()
-
-grid.arrange(tpws1plot, b1plot)
-```
-
-Try to do this for all the bouts.
-
-```{r}
-#make a function that creates the combined plot
-
-make_bout_plot <- function(bout, tpws, depth, non_recording, manual) {
- 
-  start <- manual$start[bout]
-  end <- manual$end[bout]
-  
-  bout_date <- format(start, "%b %d")
-  
-  #filter depth data for the bout
-  bout_depth <- depth %>% 
-    filter(Date >= start, 
-           Date <= end)
-  
-  #filter tpws
-  bout_tpws <- tpws %>% 
-    filter(bout.x == bout)
-  
-  #filter non-recording times
-  bout_non_recording <- non_recording %>% 
-    filter(gap_end >= start, 
-           gap_start <= end)
-  
-  # Skip if no data
-  if(nrow(bout_tpws) == 0) return(NULL)
-  
-  #plot
-  tpwsplot <- ggplot(bout_tpws, aes(clicktime, MPP)) + 
-    geom_rect(data = non_recording, 
-              aes(xmin = gap_start,
-                  xmax = gap_end, 
-                  ymin = -Inf, 
-                  ymax = Inf), 
-              fill = "gray30", 
-              alpha = 0.5, 
-              inherit.aes = FALSE) +
-    geom_point(color = "purple", alpha = 0.2, show.legend = NA) + 
-    geom_boxplot(aes(group = dive_id), fill = NA) +
-    # geom_line(aes(y = mean_MPP), color = "hotpink") +
-    scale_x_datetime(limits = c(start, end), 
-                     date_labels = "%H:M") +
-    facet_wrap(~bout.x, scales = "free_y") + 
-    theme_bw() +
-    theme(axis.title.x = element_blank(), 
-          axis.text.x = element_blank())
-  
-  depthplot <- ggplot(bout_depth, aes(Date, Depth)) +
-    geom_line(linewidth = 0.3) +
-    scale_y_reverse() +
-    scale_x_datetime(limits = c(start, end), 
-                     date_labels = "%H:%M") +
-    theme_bw() + 
-    labs(x = bout_date)
-  
-  cowplot::plot_grid(tpwsplot, depthplot, ncol = 1)
-}
-
-#make the plots
-bout_plots <- map(1:nrow(manual), 
-                   ~make_bout_plot(.x, tpws_full, depth, non_recording, manual)) 
-
-#added the figs part havent tried it yet, if it doesnt work thats why
-map(1:length(bout_plots),
-    ~ggsave(paste0("figs/comb_bouts/comb_bout_plot_", .x, ".png"),
-            bout_plots[[.x]],
-            width = 10,
-            height = 3,
-            units = "in"
-    ))
-```
-
-Edited manual.csv to combine nearby bouts (within 30 mins of each other). What's up with the missing plots? need to investigate what is happening there.
-
-```{r}
-
-
+# walk(unique(dives$dive_id), 
+#      \(fd) dive_type_plot(dives, fd, -2:2))
 
 ```
