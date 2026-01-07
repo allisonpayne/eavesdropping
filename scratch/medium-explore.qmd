@@ -1,0 +1,294 @@
+---
+title: "medium-explore"
+format: html
+---
+
+```{r}
+library(tidyverse)
+
+depth <- read_csv("data/23A1302/out-Archive.csv", show_col_types = FALSE) %>% 
+  drop_na(Depth) %>% 
+  mutate(Date = as.POSIXct(Time, format = "%H:%M:%S %d-%b-%Y", tz = "UTC"))
+
+
+ggplot(depth, aes(Date, Depth, group = 1)) +
+  geom_line(linewidth = 0.02) +
+  scale_y_reverse() +
+  theme_bw()
+```
+
+Let's pick out a single day.
+
+```{r}
+day1 <- depth %>% 
+  filter(Date >= "2025-02-24 00:00:00", 
+         Date <= "2025-02-24 11:59:59")
+
+summarize(day1, 
+          depth = mean(Depth), 
+          min = min(Depth), 
+          max = max(Depth))
+
+ggplot(day1, aes(Date, Depth)) +
+  geom_line(linewidth = 0.3) +
+  scale_y_reverse() +
+  theme_bw()
+```
+
+Trying to pull out individual dives for a single day, and see if we can calculate the number of bottom wiggles.
+
+```{r}
+surface_threshold <- 5
+
+day1_dives <- day1 %>% 
+  #split into dives
+  mutate(
+    surface = Depth < surface_threshold, 
+    dive_change = surface & lag(!surface, default = TRUE), 
+    dive_id = cumsum(dive_change)
+  ) %>% 
+#detect wiggles
+group_by(dive_id) %>% 
+  mutate(max_depth = max(Depth, na.rm = TRUE), 
+         bottom_thresh = max_depth * 0.80, #threshold at bottom 80% of the dive
+         at_bottom = Depth >= bottom_thresh, 
+         time_diff = as.numeric(difftime(Date, lag(Date), units = "secs")),
+         depth_change = Depth - lag(Depth),
+         direction = sign(depth_change),  # +1 = deeper, -1 = shallower
+         direction_change = direction != lag(direction)  # Wiggle detected!
+  ) %>%
+  ungroup()
+
+
+dive_stats_day1 <- day1_dives %>% 
+  group_by(dive_id) %>% 
+  summarize(
+    start = min(Date), 
+    end = max(Date), 
+    duration_min = as.numeric(difftime(end, start, units = "mins")), 
+    max_depth = max(Depth), 
+    mean_depth = mean(Depth), 
+    n_records = n(),
+    #wiggle stats
+    bottom_duration_min = sum(at_bottom, na.rm = TRUE) * mean(time_diff, na.rm = TRUE) / 60,
+    n_bottom_wiggles = sum(at_bottom & direction_change, na.rm = TRUE),
+    wiggles_per_min = n_bottom_wiggles / pmax(bottom_duration_min, 0.01),
+    bottom_depth_range = ifelse(any(at_bottom), 
+                                 max(Depth[at_bottom]) - min(Depth[at_bottom]), 
+                                 NA),
+    
+    .groups = "drop"
+  ) %>% 
+  filter(duration_min > 3)
+```
+
+Let's try it for the whole dataset.
+
+```{r}
+#surface threshold still 5m
+
+dives <- depth %>% 
+  mutate(
+    surface = Depth < surface_threshold, 
+    dive_change = surface & lag(!surface, default = TRUE), 
+    dive_id = cumsum(dive_change)
+    ) %>% 
+      group_by(dive_id) %>% 
+      mutate(max_depth = max(Depth, na.rm = TRUE), 
+             bottom_thresh = max_depth * 0.80, #threshold at bottom 80% of the dive
+             at_bottom = Depth >= bottom_thresh, 
+             time_diff = as.numeric(difftime(Date, lag(Date), units = "secs")),
+             depth_change = Depth - lag(Depth),
+             direction = sign(depth_change),  # +1 = deeper, -1 = shallower
+             direction_change = direction != lag(direction)  # Wiggle detected!
+      ) %>%
+      ungroup()
+
+dive_stats <- dives %>% 
+  group_by(dive_id) %>% 
+  summarize(
+    start = min(Date), 
+    end = max(Date), 
+    duration_min = as.numeric(difftime(end, start, units = "mins")), 
+    max_depth = max(Depth), 
+    mean_depth = mean(Depth), 
+    n_records = n(), 
+    bottom_duration_min = sum(at_bottom, na.rm = TRUE) * mean(time_diff, na.rm = TRUE) / 60,
+    n_bottom_wiggles = sum(at_bottom & direction_change, na.rm = TRUE),
+    wiggles_per_min = n_bottom_wiggles / pmax(bottom_duration_min, 0.01),
+    bottom_depth_range = ifelse(any(at_bottom), 
+                                 max(Depth[at_bottom]) - min(Depth[at_bottom]), 
+                                 NA),
+    .groups = "drop") %>% 
+  filter(duration_min > 3)
+```
+
+Now let's plot something simple, like the length of the dive and the number of wiggles. Then maybe let's do the wiggle rate by day.
+
+```{r}
+
+ggplot(dive_stats, aes(bottom_duration_min, n_bottom_wiggles)) + 
+  geom_point() + 
+  theme_bw()
+
+ggplot(dive_stats, aes(max_depth, wiggles_per_min)) + 
+  geom_point() + 
+  theme_bw()
+
+#wiggles/min by day
+ggplot(dive_stats, aes(start, wiggles_per_min)) + 
+  geom_point() + 
+  theme_bw()
+```
+
+Ok, let's make these into functions.
+
+```{r}
+get_dives <- function(depth, surface_threshold, bottom_percent) {
+  
+  depth %>% 
+  mutate(
+    surface = Depth < surface_threshold, 
+    dive_change = surface & lag(!surface, default = TRUE), 
+    dive_id = cumsum(dive_change)
+  ) %>% 
+    filter(!surface) %>%  # Remove surface intervals
+    group_by(dive_id) %>% 
+    mutate(max_depth = max(Depth, na.rm = TRUE), 
+           bottom_thresh = max_depth * 0.80, #threshold at bottom 80% of the dive
+           at_bottom = Depth >= bottom_thresh, 
+           time_diff = as.numeric(difftime(Date, lag(Date), units = "secs")),
+           depth_change = Depth - lag(Depth),
+           direction = sign(depth_change),  # +1 = deeper, -1 = shallower
+           direction_change = direction != lag(direction)  # Wiggle detected!
+    ) %>%
+    ungroup()
+}
+
+summarize_dives <- function(dives, min_duration_min = 3) {
+  
+  dives %>% 
+  group_by(dive_id) %>% 
+  summarize(
+    start = min(Date), 
+    end = max(Date), 
+    duration_min = as.numeric(difftime(end, start, units = "mins")), 
+    max_depth = max(Depth), 
+    mean_depth = mean(Depth), 
+    n_records = n(), 
+    bottom_duration_min = sum(at_bottom, na.rm = TRUE) * mean(time_diff, na.rm = TRUE) / 60,
+    n_bottom_wiggles = sum(at_bottom & direction_change, na.rm = TRUE),
+    wiggles_per_min = n_bottom_wiggles / pmax(bottom_duration_min, 0.01),
+    bottom_depth_range = ifelse(any(at_bottom), 
+                                 max(Depth[at_bottom]) - min(Depth[at_bottom]), 
+                                 NA),
+    .groups = "drop") %>% 
+  filter(duration_min > min_duration_min)
+  
+}
+
+
+dives <- get_dives(depth, 5, 80)
+dive_stats <- summarize_dives(dives)
+print(dive_stats)
+```
+
+Plotting dives on March 1 to try to pick out resting dives.
+
+```{r}
+march1 <- depth %>% 
+  filter(Date >= "2025-03-01 16:00:00", 
+         Date <= "2025-03-01 19:59:59")
+mar_dives <- get_dives(march1, 5, 80)
+mar_sum <- summarize_dives(mar_dives)
+
+ggplot(march1, aes(Date, Depth)) +
+  geom_line(linewidth = 0.3) +
+  scale_y_reverse() +
+  theme_bw()
+```
+
+Plot the dive record during SW encounters.
+
+```{r}
+library(gridExtra)
+
+sw <- read.csv("data/sw/sw-manual.csv") %>% 
+  filter(species == "SW")
+
+#convert times to POSIXct and add boutID
+sw <- sw %>% 
+  mutate(start = ymd_hms(start), 
+         end = ymd_hms(end), 
+         bout = row_number())
+
+#get the dives for the first bout
+bout1 <- depth %>% 
+  filter(Date >= sw$start[1], 
+         Date <= sw$end[1])
+
+tpws1 <- tpws_full %>% filter(bout.x == 1)
+
+b1plot <- ggplot(bout1, aes(Date, Depth)) +
+  geom_line(linewidth = 0.3) +
+  scale_y_reverse() +
+  theme_bw()
+
+tpws1plot <- ggplot(tpws1, aes(clicktime, MPP)) + 
+  geom_point(alpha = 0.5) + 
+  geom_line(aes(y = mean_MPP), color = "hotpink") +
+  facet_wrap(~bout.x, scales = "free") + 
+  theme_bw()
+
+grid.arrange(tpws1plot, b1plot)
+```
+
+plot tpws and recording times, and the dive record and recording times, to make sure it makes sense.
+
+```{r}
+
+recording <- read.csv("data/wav_timestamps.csv") %>% 
+  mutate(start = ymd_hms(start_time, tz = "UTC"),
+         end = ymd_hms(end_time, tz = "UTC")) %>% 
+  drop_na(end)
+
+record_depth <- depth %>% 
+  mutate(Date = ymd_hms(Date, tz = "UTC")) %>% 
+  filter(Date <= max(recording$end))
+
+ggplot(record_depth, aes(Date, Depth)) +
+  geom_rect(data = recording,
+            aes(xmin = start,
+                xmax = end, 
+                ymin = 1000, 
+                ymax = 5),
+            fill = "red", alpha = 0.25,
+            inherit.aes = FALSE) +
+  geom_line(linewidth = 0.02) +
+  scale_y_reverse() +
+  theme_bw()
+```
+
+for one day
+
+```{r}
+day1_depth <- record_depth %>% 
+  filter(Date >= "2025-03-19 12:00:00", 
+         Date <= "2025-03-19 17:00:00")
+
+day1_recording <- recording %>% 
+  filter(start >= "2025-03-19 12:00:00", 
+         end <= "2025-03-19 17:00:00")
+
+ggplot(day1_depth, aes(Date, Depth)) +
+  geom_rect(data = day1_recording,
+            aes(xmin = start,
+                xmax = end,
+                ymin = 450,
+                ymax = 5),
+            fill = "red", alpha = 0.25,
+            inherit.aes = FALSE) +
+  geom_line(linewidth = 0.3) +
+  scale_y_reverse() +
+  theme_bw()
+```

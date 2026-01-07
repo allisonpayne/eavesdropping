@@ -1,0 +1,62 @@
+```{r}
+library(tidyverse)
+library(lubridate)
+library(sf)
+library(ggspatial)
+library(leaflet)
+library(mapview)
+
+# # depth <- read.csv("data/argos/255226-MinMaxDepth.csv") %>% 
+# #   separate(Date, c("time", "date"), sep = " ") 
+# # 
+# # depth %>% 
+# #   mutate(MaxDepth = as.numeric(MaxDepth)) %>% 
+# #   filter(!is.na(MaxDepth)) %>% 
+# #   summarize(n_depths = length(MaxDepth), 
+# #             recording = sum(MaxDepth > 400),
+# #             max_depth = max(MaxDepth),
+# #             mean_depth = mean(MaxDepth))
+# 
+# depth2 <- read_csv("data/23A1302.csv", skip = 3) %>% 
+#   mutate(Date = as.POSIXct(Date * 24 * 3600, origin = "1900-01-01"), 
+# #          Depth = parse_number(Depth))
+#          
+# ggplot(depth2, aes(Date, Depth)) + 
+#   geom_line() + 
+#   scale_y_reverse() + 
+#   theme_bw()
+
+seal_gps <- read_csv("data/255226-gps-1/H391-255226-1-FastGPS.csv")
+
+sf_locs <- seal_gps %>% 
+  drop_na(Latitude) %>% 
+  separate(InitTime, c("Time", "Date"), sep = " ") %>% 
+  mutate(Date = as.Date(Date, format = "%d-%b-%Y")) %>% 
+  st_as_sf(coords = c("Latitude", "Longitude"), crs = st_crs("epsg:4326"))
+
+locs <- seal_gps %>% 
+  drop_na(Latitude) %>% 
+  mutate(Date_es = as.POSIXct(InitTime, 
+                           format = "%H:%M:%S %d-%b-%Y", 
+                           tz = "UTC")) %>% 
+  select(Date_es, Latitude, Longitude) %>% 
+  write_csv("data/seal_locations.csv")
+
+ggplot(data = sf_locs) + 
+  geom_sf(aes(color = Date)) + 
+  geom_sf(data = )
+  xlab("Longitude") + 
+  ylab("Latitude") + 
+  theme_minimal()
+
+seal_depth <- read_csv("data/23A1302/out-Archive.csv") 
+seal_depth <- seal_depth %>% 
+  drop_na(Depth) %>% 
+  separate(Time, c("Time", "Date"), sep = " ") %>% 
+  mutate(Date = as.Date(Date, format = "%d-%b-%Y"))
+
+
+ggplot(data = seal_depth, aes(Date, -Depth)) + 
+  geom_line() +
+  theme_bw()
+```

@@ -1,0 +1,29 @@
+---
+title: "inversion"
+format: html
+---
+
+When did we see inversions?
+
+```{r}
+library(tidyverse)
+
+acou <- read_csv(here::here("data/acoustic-explore.csv"),
+                 show_col_types = FALSE)
+key <- read_csv(here::here("data/explore-key.csv"), 
+                show_col_types = FALSE)
+
+acou_times <- acou %>% 
+  left_join(key, by = "page")
+
+inversions <- acou_times %>% 
+  filter(inversion == 1) %>% 
+  select(datetime, divetype, odontocetes)
+
+
+ggplot(inversions) + 
+  geom_histogram(aes(divetype, fill = factor(odontocetes)), stat = "count") + 
+  theme_bw()
+
+unique(inversions$datetime)
+```

@@ -1,0 +1,155 @@
+## Broad scale
+
+Exploring the `aniMotum` and `momentuHMM`packages as a way to fit a continuous HMM to the seal GPS data, with odontocete detections as a covariate.
+
+```{r}
+#| label: setup
+#| message: false
+
+library(aniMotum)
+library(tidyverse)
+library(momentuHMM)
+library(terra)
+library(tidyterra)
+library(amt)
+library(sf)
+
+theme_set(theme_bw())
+```
+
+Loading in our GPS data and formatting it to work with `aniMotum`:
+
+```{r}
+#| label: data
+
+track <- read_csv(here::here("data/seal_locations.csv"),
+                  show_col_types = FALSE) %>% 
+  mutate(lc = c("G"), 
+         id = c("H391")) %>% 
+  format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
+  as.data.frame()
+
+```
+
+Fit movement persistence model.
+
+```{r}
+
+page_start <- as.POSIXct("2025-02-21 06:00", tz = "US/Pacific")
+
+ssm_steps <- tibble(
+  id = "H391", 
+  date = seq(page_start, max(track$date), by = 3600 * 12)
+)
+
+fit <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "mp", #fits correlated random walk
+               time.step = ssm_steps, #12 hour steps
+               control = ssm_control(verbose = 0), 
+               ) #turns off reports
+```
+
+*Note: I chose `vmax = 3` because the AniMotum example (also on elephant seals) chose that. It would be good to double check that this makes sense.*
+
+Map:
+
+```{r}
+aniMotum::map(fit, what = "p", normalise = TRUE, silent = TRUE)
+
+#TO DO: Add actual loctions back in on top
+```
+
+Recover the regularized locations.
+
+```{r}
+#extract regularized locations
+reg_locs <- grab(fit, what = "predicted") %>% 
+  mutate(date = with_tz(date, "US/Pacific"))
+```
+
+Read and format acoustic data.
+
+```{r}
+#read in acoustic data
+acou <- read_csv(here::here("data/detections.csv"),
+                 show_col_types = FALSE) %>% 
+  mutate(start = as.POSIXct(start, tz = "US/Pacific"), 
+         end = as.POSIXct(end, tz = "US/Pacific")) %>% 
+  filter(species %in% c("PWSD", "SW"))
+
+#this dataframe only has page numbers, not the date/time - linking pages with time
+
+window_hr <- 12
+
+find_window <- function(time, start, win_hr) {
+  n_window <- as.numeric(time - start, unit = "hours") %/% win_hr
+  start + n_window * window_hr * 3600 + window_hr / 2 * 3600
+}
+
+sum_odon_exposure <- function(win_start, focal_sp) {
+  win_dur <- window_hr * 3600
+  odon_encounters <- acou %>% 
+    filter(start < win_start + win_dur,
+           end > win_start,
+           species == focal_sp)
+  if (nrow(odon_encounters) == 0) return(0)
+
+    odon_hours <- odon_encounters %>% 
+    mutate(start = pmax(start, win_start),
+           end = pmin(end, win_start + win_dur)) %>% 
+    summarize(encounter_hours = sum(as.numeric(end - start, unit = "hours"))) %>% 
+    pull(encounter_hours)
+  return(odon_hours)
+}
+acou_agg <- expand_grid(
+  date = reg_locs$date,
+  species = unique(acou$species)
+) %>% 
+  mutate(exposure_hours = map2_dbl(date, species, sum_odon_exposure))
+
+broad_dat <- left_join(reg_locs, acou_agg, by = "date") %>% 
+  pivot_wider(names_from = species, values_from = exposure_hours) %>% 
+  # crop to acoustic coverage
+  # TODO: this is *last detection*, not end of coverage.
+  filter(date <= max(acou$end))
+
+```
+
+Visualize movement persistence and acoustic data.
+
+```{r}
+
+broad_dat %>% 
+  pivot_longer(c(logit_g, PWSD, SW), 
+               names_to = "timeseries", 
+               values_to = "value") %>% 
+  ggplot(aes(date, value)) + 
+  geom_line() + 
+  geom_point() + 
+  facet_grid(timeseries ~ ., 
+             scales = "free_y")
+```
+
+It looks like there might be a relationship between movement persistence and sperm whales in particular. May need to use AR2 or AR3 (looking back 24 or 36 hours).
+
+Try fitting AR1 to start.
+
+```{r}
+
+library(brms)
+ar1_priors <- c(
+  prior(student_t(3, 0, 0.5), class = ar),
+  prior(student_t(3, 0, 0.5), class = b),
+  prior(student_t(3, 0, 1), class = Intercept),
+  prior(gamma(2, 1), class = phi),
+  prior(exponential(1), class = sderr)
+)
+broad_ar1 <- brm(
+  g ~ ar(p = 1, cov = FALSE) + SW, 
+  data = broad_dat, 
+  family = brmsfamily("beta", "logit"),
+  prior = ar1_priors,
+  control = list(adapt_delta = 0.9)
+)
+```

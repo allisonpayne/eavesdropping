@@ -1,0 +1,49 @@
+---
+title: Simulate Continuous-time Hidden Markov Model
+---
+
+```{r}
+#| label: setup
+#| message: false
+
+library(tidyverse)
+library(CircStats)
+theme_set(theme_bw())
+
+```
+
+## What is a CTHMM?
+
+It's a HMM but the observations come at inconsistent intervals. Therefore estimate state transition *rates* instead of *probabilities*.
+
+## Seal behavior
+
+At the coarse scale, two states: transient and resident. Transient state is characterized by longer step lengths and more concentrated turning angles; resident the opposite. Assume step lengths and turning angles are distributed as gamma and von Mises distributions, respectively.
+
+```{r}
+#| label: fig-ideal-emissions
+
+step_param <- list(
+  transient = c(mean = 25, dispersion = 0.2),
+  resident = c(mean = 3, dispersion = 0.15)
+)
+
+expand_grid(
+  state = c("transient", "resident"),
+  step_length = seq(0.01, 50, length.out = 1000)
+) %>% 
+  mutate(step_mean = map_dbl(state, \(s) step_param[[s]]["mean"]),
+         step_disp = map_dbl(state, \(s) step_param[[s]]["dispersion"]),
+         # See below about mean/dispersion -> shape/scale
+         step_var = step_disp * step_mean^2,
+         step_dens = dgamma(step_length, 
+                            shape = step_mean^2 / step_var, 
+                            rate = step_mean / step_var)) %>% 
+  ggplot(aes(step_length, step_dens, color = state)) +
+  geom_line()
+
+# By default, gamma is parameterized using SHAPE and RATE or SHAPE and SCALE.
+# Neither of these parameters are intuitive, so we pick a MEAN and DISPERSION
+# instead, then apply a formula to convert them to SHAPE and RATE.
+
+```

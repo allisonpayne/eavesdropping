@@ -1,0 +1,97 @@
+## Broad scale
+
+Exploring the `aniMotum` package as a way to fit a continuous HMM to the seal GPS data.
+
+I followed the installation instructions [here](https://ianjonsen.github.io/aniMotum/index.html).
+
+```{r}
+#| label: setup
+#| message: false
+
+library(aniMotum)
+library(tidyverse)
+library(betareg)
+
+theme_set(theme_bw())
+```
+
+Loading in our GPS data and formatting it to work with `aniMotum`:
+
+```{r}
+#| label: data
+
+track <- read_csv(here::here("data/seal_locations.csv"),
+                  show_col_types = FALSE) %>% 
+  mutate(lc = c("G"), 
+         id = c("H391")) %>% 
+  format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
+  as.data.frame()
+
+```
+
+The general process for fitting movement persistence models with `aniMotum` is to use the `fit_ssm` function with the argument `model = "mp"` (i.e., movement persistence).
+
+```{r}
+
+fit <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "mp", #fits continuous HMM for movement persistence
+               time.step = 24, #daily steps
+               control = ssm_control(verbose = 0)) #turns off reports
+
+summary(fit)
+```
+
+*Note: I chose `vmax = 3` because the example (also on elephant seals) chose that. It would be good to double check that this makes sense.*
+
+```{r}
+
+plot(fit, what = "predicted", type = 3, normalise = TRUE)
+```
+
+Map:
+
+```{r}
+aniMotum::map(fit, what = "p", normalise = TRUE, silent = TRUE)
+```
+
+AniMotum is giving us persistence, but I can't include the covariate of odontocete detections. However, this does confirm that persistence as a metric describes the broad-scale behavioral states. Next up, plot the persistence metric ( $\gamma$ ) as a function of "odontocete intensity" (number of detections). Max says use beta regression as an exploratory analysis.
+
+Load in the exploratory acoustic data.
+
+```{r}
+
+acou <- read_csv(here::here("data/acoustic-explore.csv"))
+
+page_start <- as.POSIXct("2025-02-21 06:00", tz = "US/Pacific")
+window_hr <- 24
+find_window <- function(time, start, win_hr) {
+  n_window <- as.numeric(time - start, unit = "hours") %/% win_hr
+  start + n_window * window_hr * 3600 + window_hr / 2 * 3600
+}
+acou_agg <- acou %>% 
+  mutate(time = page_start + (page - 1) * 3600,
+         date = find_window(time, page_start, window_hr)) %>% 
+  group_by(date) %>% 
+  summarize(n_odon = sum(odontocetes)) %>% 
+  mutate(date = lubridate::with_tz(date, "Etc/UTC"))
+
+```
+
+Plot $\gamma$ as a function of the number of odontocete detections.
+
+```{r}
+
+gamma <- fit$ssm$H391$predicted %>% select(date, g) %>% mutate(date = date - 3600)
+
+acou_gamma <- left_join(acou_agg, gamma, by = "date") %>% replace_na(list(n_odon= 0))
+
+ggplot(acou_gamma, aes(n_odon, g)) + 
+  geom_path() +
+  geom_point(aes(color = date)) + 
+  scale_color_distiller(palette = "RdYlBu")
+
+betareg()
+```
+
+Lower left corner: those points had odontocetes on preceding and subsequent days. This has removed the fact that this was a continuous process, so the relationship is lost. We need to model this as a temporal process, and also account for the fact that different odontocetes have different effects.

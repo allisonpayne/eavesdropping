@@ -1,0 +1,92 @@
+---
+title: "fine-sw"
+format: html
+---
+
+```{r}
+
+library(tidyverse)
+library(zoo)
+
+#read in the manual annotations (SW, PWSD, and vessel noise) and filter to just SW
+
+manual <- read.csv("data/sw/sw-manual.csv") %>% 
+  filter(species == "SW")
+
+#convert times to POSIXct and add boutID
+manual <- manual %>% 
+  mutate(start = ymd_hms(start), 
+         end = ymd_hms(end), 
+         bout = row_number())
+
+#read in each triton-found click with RL measurement (MPP, measured in dB)
+
+tpws <- read.csv("data/sw/tpws.csv", header = FALSE) %>% 
+  rename(clicktime = V1, MPP = V2)
+
+#convert the matlab dates to UTC
+tpws <- tpws %>% 
+  mutate(clicktime = as.POSIXct((clicktime - 719529) * 86400, 
+                      origin = "1970-01-01", 
+                      tz = "UTC"))
+
+#filter tpws to only include times in the validated manual annotations
+tpws_val <- manual %>% 
+  mutate(data = map2(start, end, ~ {
+    tpws %>% 
+      filter(clicktime >= .x & clicktime <= .y)
+  })) %>% 
+  unnest(data) %>% 
+  select(bout, start, end, clicktime, MPP) %>% 
+  filter(n() > 10)
+
+# #calculate the moving average
+# tpws_val <- tpws_val %>% 
+#   group_by(bout) %>% 
+#   arrange(clicktime) %>% 
+#   mutate(move_avg = rollmean(MPP, k = 10, fill = NA, align = "center")) %>% 
+#   filter(n() > 10) %>% 
+#   ungroup()
+```
+
+Plot each bout.
+
+```{r}
+ggplot(tpws_val, aes(clicktime, MPP)) + 
+  geom_point(alpha = 0.5) + 
+  geom_line(aes(y = move_avg), color = "hotpink") +
+  facet_wrap(~bout, scales = "free") + 
+  theme_bw()
+```
+
+Next, i want to adjust the plots so the lines show a 3-minute average instead of a 10 click rolling average. To do that, I will need to specify windows for each bout. It should be the start time plus 3 minutes, the next three minutes, etc etc until the endtime. Then for each window in each bout, I want to calculate the mean RL (MPP).
+
+```{r}
+
+#Can I get it to work for one bout? 
+
+window_min <- 1
+
+tpws_val <- tpws_val %>% 
+  mutate(time_elapsed = difftime(clicktime, start, units = "secs"), 
+         window = floor(as.numeric(time_elapsed / (window_min * 60))), 
+         win_start = start + seconds(window * window_min * 60))
+
+avg_Rl <- tpws_val %>%
+  group_by(bout, win_start) %>% 
+  summarize(mean_MPP = mean(MPP, na.rm = TRUE), 
+            clicks_per_bin = n(), 
+            .groups = "drop")
+
+tpws_full <- tpws_val %>% 
+  inner_join(avg_Rl, by = "win_start")
+```
+
+```{r}
+
+ggplot(tpws_full, aes(clicktime, MPP)) + 
+  geom_point(alpha = 0.5) + 
+  geom_line(aes(y = mean_MPP), color = "hotpink") +
+  facet_wrap(~bout.x, scales = "free") + 
+  theme_bw()
+```

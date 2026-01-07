@@ -1,0 +1,116 @@
+## Broad scale
+
+Exploring the `aniMotum` package as a way to fit a continuous HMM to the seal GPS data.
+
+I followed the installation instructions [here](https://ianjonsen.github.io/aniMotum/index.html).
+
+```{r}
+#| label: setup
+#| message: false
+
+library(aniMotum)
+library(tidyverse)
+library(terra)
+library(tidyterra)
+
+theme_set(theme_bw())
+```
+
+Loading in our GPS data and formatting it to work with `aniMotum`:
+
+```{r}
+#| label: track-data
+
+track <- read_csv(here::here("data/seal_locations.csv"),
+                  show_col_types = FALSE) %>% 
+  mutate(lc = c("G"), 
+         id = c("H391")) %>% 
+  format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
+  as.data.frame()
+
+```
+
+Load in acoustic data and aggregate it at 12-hour scale
+
+```{r}
+#| label: acou-data
+
+#read in acoustic data
+acou <- read_csv(here::here("data/detections.csv"),
+                 show_col_types = FALSE) %>% 
+  mutate(start = as.POSIXct(start, tz = "US/Pacific"), 
+         end = as.POSIXct(end, tz = "US/Pacific")) %>% 
+  filter(species == "SW")
+
+window_hr <- 12
+
+find_window <- function(time, start, win_hr) {
+  n_window <- as.numeric(time - start, unit = "hours") %/% win_hr
+  start + n_window * window_hr * 3600 + window_hr / 2 * 3600
+}
+
+sum_odon_exposure <- function(win_start) {
+  win_dur <- window_hr * 3600
+  odon_encounters <- acou %>% 
+    filter(start < win_start + win_dur,
+           end > win_start)
+  if (nrow(odon_encounters) == 0) return(0)
+  
+  odon_hours <- odon_encounters %>% 
+    mutate(start = pmax(start, win_start),
+           end = pmin(end, win_start + win_dur)) %>% 
+    summarize(encounter_hours = sum(as.numeric(end - start, unit = "hours"))) %>% 
+    pull(encounter_hours)
+  return(odon_hours)
+}
+acou_agg <- tibble(date = seq(first(track$date), last(track$date), by = window_hr * 3600)) %>% 
+  mutate(date2 = date - window_hr * 3600,
+         SW = map_dbl(date2, sum_odon_exposure),
+         id = "H391")
+
+```
+
+Trim spatial, acoustic data to audio coverage
+
+```{r}
+#| label: trim-data
+
+track <- filter(track, date < last(acou$end))
+acou_agg <- filter(acou_agg, date < last(acou$end))
+
+```
+
+Fit model
+
+```{r}
+#| label: fit-mod
+
+fit <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "mp", #fits correlated random walk
+               time.step = select(acou_agg, id, date), #12 hour steps
+               control = ssm_control(verbose = 0), 
+               env_formula = ~ SW,
+               env_data = acou_agg)
+
+```
+
+```{r}
+#| label: summ-mod
+
+fit$ssm$H391$par
+est <- fit$ssm$H391$par["beta", 1]
+se <- fit$ssm$H391$par["beta", 2]
+pnorm(est, mean = 0, sd = se, lower.tail = TRUE)
+
+```
+
+```{r}
+#| label: plot-mod
+
+p <- plot(fit, type = 3)$H391
+p +
+  geom_point(aes(date, SW / 9), acou_agg) +
+  scale_y_continuous(sec.axis = sec_axis(~ . * 9, name = "SW (hours)"))
+
+```

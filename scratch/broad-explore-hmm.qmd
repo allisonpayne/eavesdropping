@@ -1,0 +1,182 @@
+## Broad scale
+
+Exploring the `aniMotum` and `momentuHMM`packages as a way to fit a continuous HMM to the seal GPS data, with odontocete detections as a covariate.
+
+```{r}
+#| label: setup
+#| message: false
+
+library(aniMotum)
+library(tidyverse)
+library(momentuHMM)
+library(terra)
+library(tidyterra)
+library(amt)
+library(sf)
+
+theme_set(theme_bw())
+```
+
+Loading in our GPS data and formatting it to work with `aniMotum`:
+
+```{r}
+#| label: data
+
+track <- read_csv(here::here("data/seal_locations.csv"),
+                  show_col_types = FALSE) %>% 
+  mutate(lc = c("G"), 
+         id = c("H391")) %>% 
+  format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
+  as.data.frame()
+
+```
+
+Following Florko et al. 2025, fit a correlated random walk to filter and regularize location data at a 12 hour time step.
+
+```{r}
+
+fit <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "crw", #fits correlated random walk
+               time.step = 12, #12 hour steps
+               control = ssm_control(verbose = 0), 
+               ) #turns off reports
+```
+
+*Note: I chose `vmax = 3` because the AniMotum example (also on elephant seals) chose that. It would be good to double check that this makes sense.*
+
+Map:
+
+```{r}
+aniMotum::map(fit, what = "p", normalise = TRUE, silent = TRUE)
+
+#TO DO: Add actual loctions back in on top
+```
+
+Recover the regularized locations.
+
+```{r}
+#extract regularized locations
+reg_locs <- grab(fit, what = "predicted")
+```
+
+Now we can use `momentuHMM` to fit a three state HMM. First, we need to properly format the data. We need a single dataframe with the ID, coordinates, and covariates.
+
+*See Appendix3.Rmd in the movementstats_review project for details from Florko et al. 2025. See broad-explore-scratch.qmd to see comparisons between the two and three state HMMs with and without covariates for this project.*
+
+```{r}
+#read in acoustic data
+acou <- read_csv(here::here("data/detections.csv"),
+                 show_col_types = FALSE) %>% 
+  mutate(start = as.POSIXct(start), 
+         end = as.POSIXct(end)) %>% 
+  filter(species %in% c("PWSD", "SW"))
+
+#this dataframe only has page numbers, not the date/time - linking pages with time
+page_start <- as.POSIXct("2025-02-21 06:00", tz = "US/Pacific")
+
+window_hr <- 12
+
+find_window <- function(time, start, win_hr) {
+  n_window <- as.numeric(time - start, unit = "hours") %/% win_hr
+  start + n_window * window_hr * 3600 + window_hr / 2 * 3600
+}
+
+#combine with location data
+locs_agg <- reg_locs %>% 
+  mutate(window = find_window(date, page_start, window_hr)) %>% 
+  group_by(window) %>% 
+  summarize(across(c(lat, lon), mean))
+
+sum_odon_exposure <- function(win_start, focal_sp) {
+  win_dur <- window_hr * 3600
+  odon_encounters <- acou %>% 
+    filter(start < win_start + win_dur,
+           end > win_start,
+           species == focal_sp)
+  if (nrow(odon_encounters) == 0) return(0)
+
+    odon_hours <- odon_encounters %>% 
+    mutate(start = pmax(start, win_start),
+           end = pmin(end, win_start + win_dur)) %>% 
+    summarize(encounter_hours = sum(as.numeric(end - start, unit = "hours"))) %>% 
+    pull(encounter_hours)
+  return(odon_hours)
+}
+acou_agg <- expand_grid(
+  window = locs_agg$window,
+  species = unique(acou$species)
+) %>% 
+  mutate(exposure_hours = map2_dbl(window, species, sum_odon_exposure))
+
+broad_dat <- left_join(locs_agg, acou_agg, by = "window") %>% 
+  pivot_wider(names_from = species, values_from = exposure_hours) %>% 
+  # crop to acoustic coverage
+  # TODO: this is *last detection*, not end of coverage.
+  filter(window <= max(acou$end))
+
+dat_hmm <- broad_dat %>% 
+  mutate(ID = 1, 
+         x = lon, 
+         y = lat, 
+         date = window) %>% 
+  dplyr::select(ID, x, y, date, SW, PWSD) %>% 
+  as.data.frame()
+
+#Use the prepData function to calculate step length. 
+dat_hmm_prep <- momentuHMM::prepData(dat_hmm, 
+                                     coordNames = c("x", "y"),
+                                     type = "LL", 
+                                     covNames = c("SW", "PWSD"))
+```
+
+Define starting parameters.
+
+```{r}
+# define parameters
+nbStates <- 3 # number of states
+stepDist <- "gamma" # step distribution
+angleDist <- "vm" # turning angle distribution
+
+mu0 <- c(5, 12, 38) # mean step length for each state
+sigma0 <- c(3, 5, 8) # sd step length for each state
+stepPar0 <- c(mu0, sigma0)
+kappa0 <- c(0.35, 0.55, 0.5)  # turning angle for each state
+
+```
+
+Fit a 3 state model with covariates.
+
+```{r}
+formula = ~ SW + PWSD # identify covariates
+
+set.seed(2023)
+hmm_trans_3 <- suppressWarnings(
+  momentuHMM::fitHMM(data = dat_hmm_prep, 
+                     nbStates = 3,
+                     stateNames = c("Foraging", "Searching", "Transiting"),
+                     dist = list(step = stepDist, angle = angleDist),
+                     Par0 = list(step = stepPar0, angle = kappa0),
+                     formula = formula, 
+                     optMethod = "nlm",
+                     retryFits = 10)
+)
+
+momentuHMM::CIbeta(hmm_trans_3)
+
+```
+
+Visualize:
+
+```{r}
+plot(hmm_trans_3, ask = FALSE)
+```
+
+Residuals:
+
+```{r}
+plotPR(hmm_trans_3)
+
+```
+
+It looks like good fit, but it isn't converging.
