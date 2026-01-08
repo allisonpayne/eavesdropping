@@ -3,8 +3,8 @@ make_bout_plot <- function(bout, tpws, depth, non_recording, manual) {
   start <- manual$start[bout]
   end <- manual$end[bout]
   
-  plot_start <- start - hours(1)
-  plot_end <- end + hours(1)
+  plot_start <- start - hours(5)
+  plot_end <- end + hours(5)
   
   bout_date <- format(start, "%b %d")
   

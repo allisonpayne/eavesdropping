@@ -25,6 +25,8 @@ dives <- get_dives(depth, 5, 80)
 Next, load in the acoustic data. We have two kinds of acoustic data: manual annotations of sperm whale bouts, and triton-detected sperm whale clicks (aka, TPWS).
 
 ```{r}
+source("R/broad_funcs.R")
+
 #sw_comb_bouts has just sperm whales, and all nearby bouts are combined. 
 
 manual <- read.csv(here::here("data/sw_comb_bouts.csv")) 
@@ -34,6 +36,11 @@ manual <- manual %>%
   mutate(start = ymd_hms(start, tz = "UTC"), 
          end = ymd_hms(end, tz = "UTC"), 
          bout = row_number())
+
+window_hr <- 12
+
+sw_manual <- tibble(date = seq(first(manual$start), last(manual$end), by = window_hr * 3600)) %>% 
+  mutate(SW = map_dbl(date, \(d) sum_odon_exposure(data = manual, d)))
 
 #read in each triton-found click with RL measurement (MPP, measured in dB)
 tpws <- read.csv(here::here("data/sw/tpws.csv"), header = FALSE) %>% 
@@ -45,9 +52,18 @@ tpws <- tpws %>%
                       origin = "1970-01-01", 
                       tz = "UTC"))
 
+ggplot(tpws, aes(clicktime)) + 
+  geom_histogram(color = "white", fill = "gray") +
+  geom_line(data = sw_manual, aes(date, SW * 800), color = "hotpink") +
+  theme_bw()
+```
+
+Validating TPWS
+
+```{r}
 #filter tpws to only include times in the validated manual annotations
 tpws_val <- manual %>% 
-  mutate(data = map2(start - hours(3), end + hours(3), ~ {
+  mutate(data = map2(start - hours(5), end + hours(5), ~ {
     tpws %>% 
       filter(clicktime >= .x & clicktime <= .y)
   })) %>% 
