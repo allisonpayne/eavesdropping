@@ -35,6 +35,8 @@ Load in acoustic data and aggregate it at 12-hour scale
 ```{r}
 #| label: acou-data
 
+source("R/broad_funcs.R")
+
 #read in acoustic data
 acou <- read_csv(here::here("data/detections.csv"),
                  show_col_types = FALSE) %>% 
@@ -44,28 +46,9 @@ acou <- read_csv(here::here("data/detections.csv"),
 
 window_hr <- 12
 
-find_window <- function(time, start, win_hr) {
-  n_window <- as.numeric(time - start, unit = "hours") %/% win_hr
-  start + n_window * window_hr * 3600 + window_hr / 2 * 3600
-}
-
-sum_odon_exposure <- function(win_start) {
-  win_dur <- window_hr * 3600
-  odon_encounters <- acou %>% 
-    filter(start < win_start + win_dur,
-           end > win_start)
-  if (nrow(odon_encounters) == 0) return(0)
-  
-  odon_hours <- odon_encounters %>% 
-    mutate(start = pmax(start, win_start),
-           end = pmin(end, win_start + win_dur)) %>% 
-    summarize(encounter_hours = sum(as.numeric(end - start, unit = "hours"))) %>% 
-    pull(encounter_hours)
-  return(odon_hours)
-}
 acou_agg <- tibble(date = seq(first(track$date), last(track$date), by = window_hr * 3600)) %>% 
   mutate(date2 = date - window_hr * 3600,
-         SW = map_dbl(date2, sum_odon_exposure),
+         SW = map_dbl(date, \(d) sum_odon_exposure(data = acou, d)))
          id = "H391")
 
 ```
