@@ -27,6 +27,14 @@ make_bout_plot <- function(bout, tpws, depth, non_recording, manual) {
   
   #plot
   tpwsplot <- ggplot(bout_tpws, aes(clicktime, MPP)) + 
+    geom_rect(data = manual, 
+              aes(xmin = start,
+                  xmax = end, 
+                  ymin = -Inf, 
+                  ymax = Inf), 
+              fill = "palegreen", 
+              alpha = 0.2, 
+              inherit.aes = FALSE) +
     geom_rect(data = non_recording, 
               aes(xmin = gap_start,
                   xmax = gap_end, 

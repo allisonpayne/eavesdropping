@@ -47,13 +47,12 @@ tpws <- tpws %>%
 
 #filter tpws to only include times in the validated manual annotations
 tpws_val <- manual %>% 
-  mutate(data = map2(start, end, ~ {
+  mutate(data = map2(start - hours(3), end + hours(3), ~ {
     tpws %>% 
       filter(clicktime >= .x & clicktime <= .y)
   })) %>% 
   unnest(data) %>% 
-  select(bout, start, end, clicktime, MPP) %>% 
-  filter(n() > 10)
+  select(bout, start, end, clicktime, MPP)
 
 # #choose window in minutes, then create columns for the window in the data frame
 window_min <- 5
@@ -107,12 +106,14 @@ source("R/fine_plots.R")
 bout_plots <- map(1:nrow(manual), 
                    ~make_bout_plot(.x, tpws_full, depth, non_recording, manual)) 
 
+bout_plots
+
 #save the plots to the outputs folder
 map(1:length(bout_plots),
-    ~ggsave(paste0("output/bout_plots/comb_bouts/comb_bout_context_plot_", .x, ".png"),
+    ~ggsave(paste0("output/bout_plots/comb_bouts/comb_bout_v3_", .x, ".png"),
             bout_plots[[.x]],
             width = 10,
-            height = 3,
+            height = 6,
             units = "in"
     ))
 ```
