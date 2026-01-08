@@ -10,6 +10,7 @@ First, read in the dive data and split into individual dives.
 library(tidyverse)
 library(zoo)
 library(gridExtra)
+source("R/dives.R")
 
 depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), show_col_types = FALSE) %>%
   drop_na(Depth) %>% 
