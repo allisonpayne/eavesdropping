@@ -109,7 +109,7 @@ bout_plots <- map(1:nrow(manual),
 
 #save the plots to the outputs folder
 map(1:length(bout_plots),
-    ~ggsave(paste0("output/bout_plots/comb_bouts/comb_bout_plot_", .x, ".png"),
+    ~ggsave(paste0("output/bout_plots/comb_bouts/comb_bout_context_plot_", .x, ".png"),
             bout_plots[[.x]],
             width = 10,
             height = 3,
