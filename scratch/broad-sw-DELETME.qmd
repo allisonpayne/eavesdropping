@@ -30,27 +30,36 @@ track <- read_csv(here::here("data/seal_locations.csv"),
 
 ```
 
-Load in acoustic data and aggregate it at 12-hour scale
+Load in acoustic data and aggregate it at 6-hour scale
 
 ```{r}
 #| label: acou-data
 
-source(here::here("R/broad_funcs.R"))
+source("R/broad_funcs.R")
 
 #read in acoustic data
 acou <- read_csv(here::here("data/detections.csv"),
                  show_col_types = FALSE) %>% 
   mutate(start = as.POSIXct(start, tz = "US/Pacific"), 
-         end = as.POSIXct(end, tz = "US/Pacific"))
+         end = as.POSIXct(end, tz = "US/Pacific")) %>% 
+  filter(species == "SW")
 
-#read in sperm whale data
+window_hr <- 6
+
+acou_agg <- tibble(date = seq(first(track$date), last(track$date), by = window_hr * 3600)) %>% 
+  mutate(date2 = date - window_hr * 3600,
+         SW = map_dbl(date, \(d) sum_odon_exposure(data = acou, d)),
+         id = "H391")
+
+```
+
+```{r}
+#validated detections
 sw_valid <- read_csv(here::here("data/SWCombBouts_Validated.csv"), 
                      show_col_types = FALSE) %>% 
   mutate(start= as.POSIXct(start, tz = "US/Pacific"), 
          end = as.POSIXct(end, tz = "US/Pacific")) %>% 
   select(-notes)
-
-window_hr <- 6
 
 acou_agg_valid <- tibble(date = seq(first(track$date), 
                                     last(track$date), 
@@ -81,8 +90,8 @@ Fit model
 fit <- fit_ssm(track, 
                vmax = 3, #max travel rate 
                model = "mp", #fits correlated random walk
-               time.step = select(acou_agg_valid, id, date), #6 hour steps
-               control = ssm_control(verbose = 0), 
+               time.step = select(acou_agg_valid, id, date), #12 hour steps
+               control = ssm_control(verbose = 1), 
                env_formula = ~ SW,
                env_data = acou_agg_valid)
 
@@ -116,26 +125,17 @@ ggplot(fit$ssm[[1]]$predicted) +
   scale_color_gradient2(midpoint = 0.5, limits = c(0, 1))
 ```
 
-Alternative hypotheses:
-
-1.  Luck
-    1.  SW and ES converged on the patch
-2.  Memory
-    1.  Look up where she went previous year & for the long foraging trip - not here
-3.  Other environmental cues (temperature)
-    1.  Use temperature sensor on tag at a consistent depth - if it was this, she should experience a change in temperature around X time
-    2.  Could fit the same SSM with temperature and see which is a better fit
-    3.  Could include multiple covariates for temp (upper 50m, at depth, etc), or FTLE in that region - mesoscale activity
-
 ```{r}
 fit_lag <- fit_ssm(track, 
                vmax = 3, #max travel rate 
                model = "mp", #fits correlated random walk
                time.step = select(acou_agg_valid, id, date), #12 hour steps
-               control = ssm_control(verbose = 0), 
+               control = ssm_control(verbose = 1), 
                env_formula = ~ SW_lag,
                env_data = acou_agg_valid)
+```
 
+```{r}
 #get lag results
 fit_lag$ssm$H391$par
 est_lag <- fit_lag$ssm$H391$par["beta", 1]
@@ -148,11 +148,13 @@ fit_lead <- fit_ssm(track,
                vmax = 3, #max travel rate 
                model = "mp", #fits correlated random walk
                time.step = select(acou_agg_valid, id, date), #12 hour steps
-               control = ssm_control(verbose = 0), 
+               control = ssm_control(verbose = 1), 
                env_formula = ~ SW_lead,
                env_data = acou_agg_valid)
+```
 
-#get lead results
+```{r}
+#plot lead results
 fit_lead$ssm$H391$par
 est_lead <- fit_lead$ssm$H391$par["beta", 1]
 se_lead <- fit_lead$ssm$H391$par["beta", 2]
