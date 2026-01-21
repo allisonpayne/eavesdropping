@@ -1,8 +1,6 @@
 ---
-title: "Fine scale"
+title: "fine-sw"
 format: html
-execute: 
-  warning: FALSE
 ---
 
 First, read in the dive data and split into individual dives.
@@ -12,7 +10,7 @@ First, read in the dive data and split into individual dives.
 library(tidyverse)
 library(zoo)
 library(gridExtra)
-source(here::here("R/dives.R"))
+source("R/dives.R")
 
 depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), show_col_types = FALSE) %>%
   drop_na(Depth) %>% 
@@ -24,12 +22,10 @@ dives <- get_dives(depth, 5, 80)
 
 ```
 
-Next, load in the acoustic data. We have two kinds of acoustic data: manual annotations of sperm whale bouts, and triton-detected sperm whale clicks (aka, TPWS). We want to compare them and make sure they look similar.
-
-**to-do: update the manual annotations, they are newly validated.**
+Next, load in the acoustic data. We have two kinds of acoustic data: manual annotations of sperm whale bouts, and triton-detected sperm whale clicks (aka, TPWS).
 
 ```{r}
-source(here::here("R/broad_funcs.R"))
+source("R/broad_funcs.R")
 
 #sw_comb_bouts has just sperm whales, and all nearby bouts are combined. 
 
@@ -62,7 +58,7 @@ ggplot(tpws, aes(clicktime)) +
   theme_bw()
 ```
 
-Cutting tpws to the manual annotations, but show 5 hours of tpws + dives on either side.
+Validating TPWS
 
 ```{r}
 #filter tpws to only include times in the validated manual annotations
@@ -106,13 +102,13 @@ tpws_full$dive_id <- findInterval(tpws_full$clicktime, dive_starts$Date)
 Calculating when the device was NOT recording audio.
 
 ```{r}
-source(here::here("R/non_recording.R"))
+source("R/non_recording.R")
 
 #wav_timestamps.csv is the output of the function get_wav_timestamps.R. 
-recording <- read.csv(here::here("data/wav_timestamps.csv")) %>% 
-                        mutate(start = ymd_hms(start_time, tz = "UTC"),
-                               end = ymd_hms(end_time, tz = "UTC")) %>% 
-                        drop_na(end)
+recording <- read.csv("data/wav_timestamps.csv") %>% 
+  mutate(start = ymd_hms(start_time, tz = "UTC"),
+         end = ymd_hms(end_time, tz = "UTC")) %>% 
+  drop_na(end)
 
 non_recording <- calculate_non_recording(recording)
 ```
@@ -120,7 +116,7 @@ non_recording <- calculate_non_recording(recording)
 Plotting the received level vs. time on top, with the dive record underneath.
 
 ```{r}
-source(here::here("R/fine_plots.R"))
+source("R/fine_plots.R")
 
 #make the plots
 bout_plots <- map(1:nrow(manual), 
@@ -129,11 +125,11 @@ bout_plots <- map(1:nrow(manual),
 bout_plots
 
 #save the plots to the outputs folder
-# map(1:length(bout_plots),
-#     ~ggsave(paste0("output/bout_plots/comb_bouts/comb_bout_v3_", .x, ".png"),
-#             bout_plots[[.x]],
-#             width = 10,
-#             height = 6,
-#             units = "in"
-#     ))
+map(1:length(bout_plots),
+    ~ggsave(paste0("output/bout_plots/comb_bouts/comb_bout_v3_", .x, ".png"),
+            bout_plots[[.x]],
+            width = 10,
+            height = 6,
+            units = "in"
+    ))
 ```

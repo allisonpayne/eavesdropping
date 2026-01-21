@@ -1,8 +1,6 @@
-## Broad scale
+# Broad scale
 
-Exploring the `aniMotum` package as a way to fit a continuous HMM to the seal GPS data.
-
-I followed the installation instructions [here](https://ianjonsen.github.io/aniMotum/index.html).
+Using the `aniMotum` package as a way to fit a continuous HMM to the seal GPS data.
 
 ```{r}
 #| label: setup
@@ -30,20 +28,20 @@ track <- read_csv(here::here("data/seal_locations.csv"),
 
 ```
 
-Load in acoustic data and aggregate it at 12-hour scale
+Load in acoustic data and aggregate it at 6-hour scale
 
 ```{r}
 #| label: acou-data
 
 source(here::here("R/broad_funcs.R"))
 
-#read in acoustic data
+#read in the general acoustic data
 acou <- read_csv(here::here("data/detections.csv"),
                  show_col_types = FALSE) %>% 
   mutate(start = as.POSIXct(start, tz = "US/Pacific"), 
          end = as.POSIXct(end, tz = "US/Pacific"))
 
-#read in sperm whale data
+#read in sperm whale data 
 sw_valid <- read_csv(here::here("data/SWCombBouts_Validated.csv"), 
                      show_col_types = FALSE) %>% 
   mutate(start= as.POSIXct(start, tz = "US/Pacific"), 
@@ -116,18 +114,33 @@ ggplot(fit$ssm[[1]]$predicted) +
   scale_color_gradient2(midpoint = 0.5, limits = c(0, 1))
 ```
 
-Alternative hypotheses:
+## Alternative hypotheses:
 
-1.  Luck
-    1.  SW and ES converged on the patch
-2.  Memory
-    1.  Look up where she went previous year & for the long foraging trip - not here
-3.  Other environmental cues (temperature)
-    1.  Use temperature sensor on tag at a consistent depth - if it was this, she should experience a change in temperature around X time
-    2.  Could fit the same SSM with temperature and see which is a better fit
-    3.  Could include multiple covariates for temp (upper 50m, at depth, etc), or FTLE in that region - mesoscale activity
+### 1. Luck
+
+Maybe sperm whales and elephant seals both just happened to converge on the patch. If that's true, then adding a 6 hour *lag time* or *lead time* to the model should have similar results.
 
 ```{r}
+#| label: lead-mod
+
+fit_lead <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "mp", #fits correlated random walk
+               time.step = select(acou_agg_valid, id, date), #12 hour steps
+               control = ssm_control(verbose = 0), 
+               env_formula = ~ SW_lead,
+               env_data = acou_agg_valid)
+
+#get lead results
+fit_lead$ssm$H391$par
+est_lead <- fit_lead$ssm$H391$par["beta", 1]
+se_lead <- fit_lead$ssm$H391$par["beta", 2]
+pnorm(est_lead, mean = 0, sd = se_lead, lower.tail = TRUE)
+```
+
+```{r}
+#| label: lag-mod
+
 fit_lag <- fit_ssm(track, 
                vmax = 3, #max travel rate 
                model = "mp", #fits correlated random walk
@@ -143,18 +156,16 @@ se_lag <- fit_lag$ssm$H391$par["beta", 2]
 pnorm(est_lag, mean = 0, sd = se_lag, lower.tail = TRUE)
 ```
 
-```{r}
-fit_lead <- fit_ssm(track, 
-               vmax = 3, #max travel rate 
-               model = "mp", #fits correlated random walk
-               time.step = select(acou_agg_valid, id, date), #12 hour steps
-               control = ssm_control(verbose = 0), 
-               env_formula = ~ SW_lead,
-               env_data = acou_agg_valid)
+A model fitted to the lag/lead values are not at *all* significant (.5-.6 one-tailed p-test), while the model fitted to the actual values is (0.03, 1 tailed p test).
 
-#get lead results
-fit_lead$ssm$H391$par
-est_lead <- fit_lead$ssm$H391$par["beta", 1]
-se_lead <- fit_lead$ssm$H391$par["beta", 2]
-pnorm(est_lead, mean = 0, sd = se_lead, lower.tail = TRUE)
-```
+### 2. Memory
+
+Maybe H391 has been to that patch before and knew that there was good food there, and she didn't actually use the sperm whale cue at all. We don't know what she does every year, but we do know that for her two other instrumented trips, she traveled offshore - so this isn't just "her spot."
+
+### 3. Other environmental cues
+
+Maybe the seal wasn't using sperm whales at all, but their calls happened to coincide with another environmental cue, like SST, temp at depth, or FTLE. We could use the tag's temperature sensor and FTLE measurements to fit our same SSM with oceanographic covariates instead of sperm whale presence and see if the fit is better or worse than with SW.
+
+#### Next step: the fine scale. 
+
+We will fit a hidden markov model to the seal's diving behavior and allow the properties of the sperm whale clicks (received level and peak frequency, both associated with how far away the whales are) to influence her transition probabilities.

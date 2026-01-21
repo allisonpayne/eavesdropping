@@ -83,10 +83,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 
 
-<section id="broad-scale" class="level2">
-<h2 class="anchored" data-anchor-id="broad-scale">Broad scale</h2>
-<p>Exploring the <code>aniMotum</code> package as a way to fit a continuous HMM to the seal GPS data.</p>
-<p>I followed the installation instructions <a href="https://ianjonsen.github.io/aniMotum/index.html">here</a>.</p>
+<section id="broad-scale" class="level1">
+<h1>Broad scale</h1>
+<p>Using the <code>aniMotum</code> package as a way to fit a continuous HMM to the seal GPS data.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(aniMotum)</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
@@ -104,17 +103,17 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">format_data</span>(<span class="at">date =</span> <span class="st">"Date_es"</span>, <span class="at">coord =</span> <span class="fu">c</span>(<span class="st">"Longitude"</span>, <span class="st">"Latitude"</span>)) <span class="sc">%&gt;%</span> </span>
 <span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.data.frame</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
-<p>Load in acoustic data and aggregate it at 12-hour scale</p>
+<p>Load in acoustic data and aggregate it at 6-hour scale</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(here<span class="sc">::</span><span class="fu">here</span>(<span class="st">"R/broad_funcs.R"</span>))</span>
 <span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="co">#read in acoustic data</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="co">#read in the general acoustic data</span></span>
 <span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>acou <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(here<span class="sc">::</span><span class="fu">here</span>(<span class="st">"data/detections.csv"</span>),</span>
 <span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>                 <span class="at">show_col_types =</span> <span class="cn">FALSE</span>) <span class="sc">%&gt;%</span> </span>
 <span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">start =</span> <span class="fu">as.POSIXct</span>(start, <span class="at">tz =</span> <span class="st">"US/Pacific"</span>), </span>
 <span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>         <span class="at">end =</span> <span class="fu">as.POSIXct</span>(end, <span class="at">tz =</span> <span class="st">"US/Pacific"</span>))</span>
 <span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="co">#read in sperm whale data</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="co">#read in sperm whale data </span></span>
 <span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>sw_valid <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(here<span class="sc">::</span><span class="fu">here</span>(<span class="st">"data/SWCombBouts_Validated.csv"</span>), </span>
 <span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>                     <span class="at">show_col_types =</span> <span class="cn">FALSE</span>) <span class="sc">%&gt;%</span> </span>
 <span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">start=</span> <span class="fu">as.POSIXct</span>(start, <span class="at">tz =</span> <span class="st">"US/Pacific"</span>), </span>
@@ -192,61 +191,21 @@ beta    -0.16588193 0.09263092</code></pre>
 </div>
 </div>
 </div>
-<p>Alternative hypotheses:</p>
-<ol type="1">
-<li>Luck
-<ol type="1">
-<li>SW and ES converged on the patch</li>
-</ol></li>
-<li>Memory
-<ol type="1">
-<li>Look up where she went previous year &amp; for the long foraging trip - not here</li>
-</ol></li>
-<li>Other environmental cues (temperature)
-<ol type="1">
-<li>Use temperature sensor on tag at a consistent depth - if it was this, she should experience a change in temperature around X time</li>
-<li>Could fit the same SSM with temperature and see which is a better fit</li>
-<li>Could include multiple covariates for temp (upper 50m, at depth, etc), or FTLE in that region - mesoscale activity</li>
-</ol></li>
-</ol>
+<section id="alternative-hypotheses" class="level2">
+<h2 class="anchored" data-anchor-id="alternative-hypotheses">Alternative hypotheses:</h2>
+<section id="luck" class="level3">
+<h3 class="anchored" data-anchor-id="luck">1. Luck</h3>
+<p>Maybe sperm whales and elephant seals both just happened to converge on the patch. If that’s true, then adding a 6 hour <em>lag time</em> or <em>lead time</em> to the model should have similar results.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>fit_lag <span class="ot">&lt;-</span> <span class="fu">fit_ssm</span>(track, </span>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>fit_lead <span class="ot">&lt;-</span> <span class="fu">fit_ssm</span>(track, </span>
 <span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>               <span class="at">vmax =</span> <span class="dv">3</span>, <span class="co">#max travel rate </span></span>
 <span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>               <span class="at">model =</span> <span class="st">"mp"</span>, <span class="co">#fits correlated random walk</span></span>
 <span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>               <span class="at">time.step =</span> <span class="fu">select</span>(acou_agg_valid, id, date), <span class="co">#12 hour steps</span></span>
 <span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>               <span class="at">control =</span> <span class="fu">ssm_control</span>(<span class="at">verbose =</span> <span class="dv">0</span>), </span>
-<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_formula =</span> <span class="sc">~</span> SW_lag,</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_formula =</span> <span class="sc">~</span> SW_lead,</span>
 <span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_data =</span> acou_agg_valid)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="co">#get lag results</span></span>
-<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>fit_lag<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>            Estimate Std. Error
-rho_p    0.196700461 0.16587999
-sigma_x  0.449972262 0.06474538
-sigma_y  0.728503532 0.06234476
-rho_o    0.473373512 0.38979437
-tau_x   10.714605611 1.98798909
-tau_y    4.806354992 1.13613339
-sigma_g  0.079656952 0.02661704
-beta     0.004146674 0.02625133</code></pre>
-</div>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>est_lag <span class="ot">&lt;-</span> fit_lag<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">1</span>]</span>
-<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>se_lag <span class="ot">&lt;-</span> fit_lag<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">2</span>]</span>
-<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="fu">pnorm</span>(est_lag, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> se_lag, <span class="at">lower.tail =</span> <span class="cn">TRUE</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] 0.5627561</code></pre>
-</div>
-</div>
-<div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>fit_lead <span class="ot">&lt;-</span> <span class="fu">fit_ssm</span>(track, </span>
-<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>               <span class="at">vmax =</span> <span class="dv">3</span>, <span class="co">#max travel rate </span></span>
-<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>               <span class="at">model =</span> <span class="st">"mp"</span>, <span class="co">#fits correlated random walk</span></span>
-<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>               <span class="at">time.step =</span> <span class="fu">select</span>(acou_agg_valid, id, date), <span class="co">#12 hour steps</span></span>
-<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>               <span class="at">control =</span> <span class="fu">ssm_control</span>(<span class="at">verbose =</span> <span class="dv">0</span>), </span>
-<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_formula =</span> <span class="sc">~</span> SW_lead,</span>
-<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_data =</span> acou_agg_valid)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="co">#get lead results</span></span>
-<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>fit_lead<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="co">#get lead results</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>fit_lead<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>           Estimate Std. Error
 rho_p    0.19919144 0.15905051
@@ -258,13 +217,55 @@ tau_y    4.76564219 1.10122452
 sigma_g  0.07987423 0.02810979
 beta     0.01232952 0.02845206</code></pre>
 </div>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>est_lead <span class="ot">&lt;-</span> fit_lead<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">1</span>]</span>
-<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>se_lead <span class="ot">&lt;-</span> fit_lead<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">2</span>]</span>
-<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="fu">pnorm</span>(est_lead, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> se_lead, <span class="at">lower.tail =</span> <span class="cn">TRUE</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>est_lead <span class="ot">&lt;-</span> fit_lead<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">1</span>]</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>se_lead <span class="ot">&lt;-</span> fit_lead<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">2</span>]</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="fu">pnorm</span>(est_lead, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> se_lead, <span class="at">lower.tail =</span> <span class="cn">TRUE</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] 0.6676174</code></pre>
 </div>
 </div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>fit_lag <span class="ot">&lt;-</span> <span class="fu">fit_ssm</span>(track, </span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>               <span class="at">vmax =</span> <span class="dv">3</span>, <span class="co">#max travel rate </span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>               <span class="at">model =</span> <span class="st">"mp"</span>, <span class="co">#fits correlated random walk</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>               <span class="at">time.step =</span> <span class="fu">select</span>(acou_agg_valid, id, date), <span class="co">#12 hour steps</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>               <span class="at">control =</span> <span class="fu">ssm_control</span>(<span class="at">verbose =</span> <span class="dv">0</span>), </span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_formula =</span> <span class="sc">~</span> SW_lag,</span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_data =</span> acou_agg_valid)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="co">#get lag results</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>fit_lag<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            Estimate Std. Error
+rho_p    0.196700461 0.16587999
+sigma_x  0.449972262 0.06474538
+sigma_y  0.728503532 0.06234476
+rho_o    0.473373512 0.38979437
+tau_x   10.714605611 1.98798909
+tau_y    4.806354992 1.13613339
+sigma_g  0.079656952 0.02661704
+beta     0.004146674 0.02625133</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>est_lag <span class="ot">&lt;-</span> fit_lag<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">1</span>]</span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>se_lag <span class="ot">&lt;-</span> fit_lag<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">2</span>]</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="fu">pnorm</span>(est_lag, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> se_lag, <span class="at">lower.tail =</span> <span class="cn">TRUE</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 0.5627561</code></pre>
+</div>
+</div>
+<p>A model fitted to the lag/lead values are not at <em>all</em> significant (.5-.6 one-tailed p-test), while the model fitted to the actual values is (0.03, 1 tailed p test).</p>
+</section>
+<section id="memory" class="level3">
+<h3 class="anchored" data-anchor-id="memory">2. Memory</h3>
+<p>Maybe H391 has been to that patch before and knew that there was good food there, and she didn’t actually use the sperm whale cue at all. We don’t know what she does every year, but we do know that for her two other instrumented trips, she traveled offshore - so this isn’t just “her spot.”</p>
+</section>
+<section id="other-environmental-cues" class="level3">
+<h3 class="anchored" data-anchor-id="other-environmental-cues">3. Other environmental cues</h3>
+<p>Maybe the seal wasn’t using sperm whales at all, but their calls happened to coincide with another environmental cue, like SST, temp at depth, or FTLE. We could use the tag’s temperature sensor and FTLE measurements to fit our same SSM with oceanographic covariates instead of sperm whale presence and see if the fit is better or worse than with SW.</p>
+<section id="next-step-zooming-in-on-the-fine-scale." class="level4">
+<h4 class="anchored" data-anchor-id="next-step-zooming-in-on-the-fine-scale.">Next step: zooming in on the <a href="fine-sw.qmd">fine scale.</a></h4>
+</section>
+</section>
+</section>
 </section>
 
 </main>
