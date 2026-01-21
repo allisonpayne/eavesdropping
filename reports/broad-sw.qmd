@@ -166,6 +166,6 @@ Maybe H391 has been to that patch before and knew that there was good food there
 
 Maybe the seal wasn't using sperm whales at all, but their calls happened to coincide with another environmental cue, like SST, temp at depth, or FTLE. We could use the tag's temperature sensor and FTLE measurements to fit our same SSM with oceanographic covariates instead of sperm whale presence and see if the fit is better or worse than with SW.
 
-#### Next step: the fine scale. 
+#### Next step: the fine scale.
 
 We will fit a hidden markov model to the seal's diving behavior and allow the properties of the sperm whale clicks (received level and peak frequency, both associated with how far away the whales are) to influence her transition probabilities.
