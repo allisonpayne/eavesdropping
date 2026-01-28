@@ -1,0 +1,109 @@
+# Broad scale
+
+Using the `aniMotum` package as a way to fit a continuous HMM to the seal GPS data.
+
+```{r}
+#| label: setup
+#| message: false
+
+library(aniMotum)
+library(tidyverse)
+library(terra)
+library(tidyterra)
+
+theme_set(theme_bw())
+```
+
+Loading in our GPS data and formatting it to work with `aniMotum`:
+
+```{r}
+#| label: track-data
+
+track <- read_csv(here::here("data/seal_locations.csv"),
+                  show_col_types = FALSE) %>% 
+  mutate(lc = c("G"), 
+         id = c("H391")) %>% 
+  format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
+  as.data.frame()
+
+```
+
+Load in tag derived temperature data - already aggregated at a 6 hour scale. Filter it to the deployment length.
+
+```{r}
+#| label: temp-data
+#| message: false
+
+acou <- read_csv(here::here("data/detections.csv"),
+                 show_col_types = FALSE) %>% 
+  mutate(start = as.POSIXct(start, tz = "US/Pacific"), 
+         end = as.POSIXct(end, tz = "US/Pacific"))
+
+#mixed layer temperature - using average MLT and minimum temperature from this file
+mlt <- read_csv(here::here("data/23A1302/out-MixLayer.csv"))
+mlt <- mlt %>% 
+  mutate(date = as.POSIXct(Date, 
+                        format = "%H:%M:%S %d-%b-%Y", 
+                        tz = "UTC"), 
+         id = "H391") %>% 
+  filter(date < last(acou$end))
+
+# There's one clear outlier in MLT temperature, remove it and interpolate
+outlier_idx <- which(mlt$MLTave > 14)
+mlt$MLTave[outlier_idx] <- mean(mlt$MLTave[outlier_idx + c(-1, 1)])
+mlt$MLTave_std <- (mlt$MLTave - mean(mlt$MLTave)) / sd(mlt$MLTave)
+
+```
+
+Trim spatial data to audio coverage
+
+```{r}
+#| label: trim-data
+
+track <- filter(track, date < last(acou$end))
+
+```
+
+Fit model
+
+```{r}
+#| label: fit-mod-sst
+
+fit_sst <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "mp", #fits correlated random walk
+               time.step = select(mlt, id, date), #6 hour steps
+               env_formula = ~ MLTave_std,
+               env_data = select(mlt, id, date, MLTave_std))
+
+```
+
+```{r}
+#| label: summ-mod
+
+fit_sst$ssm$H391$par
+est <- fit_sst$ssm$H391$par["beta", 1]
+se <- fit_sst$ssm$H391$par["beta", 2]
+pnorm(est, mean = 0, sd = se, lower.tail = TRUE)
+
+```
+
+```{r}
+#| label: plot-mod
+
+p <- plot(fit_sst, type = 3)$H391
+p +
+  geom_point(aes(date, MLTave / max(MLTave)), mlt) +
+  scale_y_continuous(sec.axis = sec_axis(~ . * max(mlt$MLTave), name = "MLT (degC)"))
+
+```
+
+```{r}
+#| label: plot-map
+
+ggplot(fit$ssm[[1]]$predicted) + 
+  geom_sf(aes(color = g)) +
+  scale_color_gradient2(midpoint = 0.5, limits = c(0, 1))
+```
+
+## 

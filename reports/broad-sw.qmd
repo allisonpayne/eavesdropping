@@ -57,6 +57,7 @@ acou_agg_valid <- tibble(date = seq(first(track$date),
          SW = map_dbl(date, \(d) sum_odon_exposure(data = sw_valid, d)),
          SW_lag = lag(SW), 
          SW_lead = lead(SW), 
+         SW_std = (SW - mean(SW)) / sd(SW),
          id = "H391")
 
 ```
@@ -82,7 +83,7 @@ fit <- fit_ssm(track,
                time.step = select(acou_agg_valid, id, date), #6 hour steps
                control = ssm_control(verbose = 0), 
                env_formula = ~ SW,
-               env_data = acou_agg_valid)
+               env_data = select(acou_agg_valid, id, date, SW))
 
 ```
 
@@ -101,8 +102,8 @@ pnorm(est, mean = 0, sd = se, lower.tail = TRUE)
 
 p <- plot(fit, type = 3)$H391
 p +
-  geom_point(aes(date, SW / 6), acou_agg_valid) +
-  scale_y_continuous(sec.axis = sec_axis(~ . * 6, name = "SW (hours)"))
+  geom_point(aes(date, SW / max(SW)), acou_agg_valid) +
+  scale_y_continuous(sec.axis = sec_axis(~ . * max(acou_agg_valid$SW), name = "SW (hours)"))
 
 ```
 

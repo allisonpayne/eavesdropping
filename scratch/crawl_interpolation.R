@@ -66,4 +66,4 @@ combined_data <- data.frame(
 
 combined_data <- merge(combined_data, depth, by = "time")
 
-
+write_csv(combined_data, "output/h391_crawl.csv", append = FALSE)
