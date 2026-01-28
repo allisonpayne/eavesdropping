@@ -98,12 +98,4 @@ p +
 
 ```
 
-```{r}
-#| label: plot-map
-
-ggplot(fit$ssm[[1]]$predicted) + 
-  geom_sf(aes(color = g)) +
-  scale_color_gradient2(midpoint = 0.5, limits = c(0, 1))
-```
-
 ## 

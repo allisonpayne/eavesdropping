@@ -167,6 +167,58 @@ Maybe H391 has been to that patch before and knew that there was good food there
 
 Maybe the seal wasn't using sperm whales at all, but their calls happened to coincide with another environmental cue, like SST, temp at depth, or FTLE. We could use the tag's temperature sensor and FTLE measurements to fit our same SSM with oceanographic covariates instead of sperm whale presence and see if the fit is better or worse than with SW.
 
+Let's try it with average mixed layer temperature, as measured by the tag.
+
+```{r}
+#mixed layer temperature - using average MLT and minimum temperature from this file
+mlt <- read_csv(here::here("data/23A1302/out-MixLayer.csv"))
+mlt <- mlt %>% 
+  mutate(date = as.POSIXct(Date, 
+                        format = "%H:%M:%S %d-%b-%Y", 
+                        tz = "UTC"), 
+         id = "H391") %>% 
+  filter(date < last(acou$end))
+
+# There's one clear outlier in MLT temperature, remove it and interpolate
+outlier_idx <- which(mlt$MLTave > 14)
+mlt$MLTave[outlier_idx] <- mean(mlt$MLTave[outlier_idx + c(-1, 1)])
+mlt$MLTave_std <- (mlt$MLTave - mean(mlt$MLTave)) / sd(mlt$MLTave)
+```
+
+```{r}
+#| label: mlt-mod
+
+fit_sst <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "mp", #fits correlated random walk
+               time.step = select(mlt, id, date), #6 hour steps
+               env_formula = ~ MLTave_std,
+               env_data = select(mlt, id, date, MLTave_std), 
+               control = ssm_control(verbose = 0), 
+)
+
+fit_sst$ssm$H391$par
+est <- fit_sst$ssm$H391$par["beta", 1]
+se <- fit_sst$ssm$H391$par["beta", 2]
+pnorm(est, mean = 0, sd = se, lower.tail = TRUE)
+```
+
+```{r}
+p <- plot(fit_sst, type = 3)$H391
+p +
+  geom_point(aes(date, MLTave / max(MLTave)), mlt) +
+  scale_y_continuous(sec.axis = sec_axis(~ . * max(mlt$MLTave), name = "MLT (degC)"))
+```
+
+The mixed layer average temperature model isn't significant. Check the fit of this model compared to the SW model:
+
+```{r}
+fit$ssm$H391$AICc
+fit_sst$ssm$H391$AICc
+```
+
+SW model is a better fit.
+
 #### Next step: the fine scale.
 
 We will fit a hidden markov model to the seal's diving behavior and allow the properties of the sperm whale clicks (received level and peak frequency, both associated with how far away the whales are) to influence her transition probabilities.

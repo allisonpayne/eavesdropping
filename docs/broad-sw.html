@@ -129,7 +129,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>         <span class="at">SW =</span> <span class="fu">map_dbl</span>(date, \(d) <span class="fu">sum_odon_exposure</span>(<span class="at">data =</span> sw_valid, d)),</span>
 <span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>         <span class="at">SW_lag =</span> <span class="fu">lag</span>(SW), </span>
 <span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>         <span class="at">SW_lead =</span> <span class="fu">lead</span>(SW), </span>
-<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>         <span class="at">id =</span> <span class="st">"H391"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>         <span class="at">SW_std =</span> (SW <span class="sc">-</span> <span class="fu">mean</span>(SW)) <span class="sc">/</span> <span class="fu">sd</span>(SW),</span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>         <span class="at">id =</span> <span class="st">"H391"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <p>Trim spatial, acoustic data to audio coverage</p>
 <div class="cell">
@@ -144,7 +145,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>               <span class="at">time.step =</span> <span class="fu">select</span>(acou_agg_valid, id, date), <span class="co">#6 hour steps</span></span>
 <span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>               <span class="at">control =</span> <span class="fu">ssm_control</span>(<span class="at">verbose =</span> <span class="dv">0</span>), </span>
 <span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_formula =</span> <span class="sc">~</span> SW,</span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_data =</span> acou_agg_valid)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_data =</span> <span class="fu">select</span>(acou_agg_valid, id, date, SW))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>fit<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
@@ -169,8 +170,8 @@ beta    -0.16588193 0.09263092</code></pre>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">plot</span>(fit, <span class="at">type =</span> <span class="dv">3</span>)<span class="sc">$</span>H391</span>
 <span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>p <span class="sc">+</span></span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(date, SW <span class="sc">/</span> <span class="dv">6</span>), acou_agg_valid) <span class="sc">+</span></span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">sec.axis =</span> <span class="fu">sec_axis</span>(<span class="sc">~</span> . <span class="sc">*</span> <span class="dv">6</span>, <span class="at">name =</span> <span class="st">"SW (hours)"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(date, SW <span class="sc">/</span> <span class="fu">max</span>(SW)), acou_agg_valid) <span class="sc">+</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">sec.axis =</span> <span class="fu">sec_axis</span>(<span class="sc">~</span> . <span class="sc">*</span> <span class="fu">max</span>(acou_agg_valid<span class="sc">$</span>SW), <span class="at">name =</span> <span class="st">"SW (hours)"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">
@@ -261,6 +262,86 @@ beta     0.004146674 0.02625133</code></pre>
 <section id="other-environmental-cues" class="level3">
 <h3 class="anchored" data-anchor-id="other-environmental-cues">3. Other environmental cues</h3>
 <p>Maybe the seal wasn’t using sperm whales at all, but their calls happened to coincide with another environmental cue, like SST, temp at depth, or FTLE. We could use the tag’s temperature sensor and FTLE measurements to fit our same SSM with oceanographic covariates instead of sperm whale presence and see if the fit is better or worse than with SW.</p>
+<p>Let’s try it with average mixed layer temperature, as measured by the tag.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co">#mixed layer temperature - using average MLT and minimum temperature from this file</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>mlt <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(here<span class="sc">::</span><span class="fu">here</span>(<span class="st">"data/23A1302/out-MixLayer.csv"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Rows: 236 Columns: 21
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+chr  (4): DeployID, Source, Instr, Date
+dbl (14): Ptt, DepthSensor, Hours, PerCentMLTime, MLTave, MLTmin, MLTmax, ML...
+lgl  (3): LocationQuality, Latitude, Longitude
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>mlt <span class="ot">&lt;-</span> mlt <span class="sc">%&gt;%</span> </span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">date =</span> <span class="fu">as.POSIXct</span>(Date, </span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>                        <span class="at">format =</span> <span class="st">"%H:%M:%S %d-%b-%Y"</span>, </span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>                        <span class="at">tz =</span> <span class="st">"UTC"</span>), </span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a>         <span class="at">id =</span> <span class="st">"H391"</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb24-6"><a href="#cb24-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(date <span class="sc">&lt;</span> <span class="fu">last</span>(acou<span class="sc">$</span>end))</span>
+<span id="cb24-7"><a href="#cb24-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-8"><a href="#cb24-8" aria-hidden="true" tabindex="-1"></a><span class="co"># There's one clear outlier in MLT temperature, remove it and interpolate</span></span>
+<span id="cb24-9"><a href="#cb24-9" aria-hidden="true" tabindex="-1"></a>outlier_idx <span class="ot">&lt;-</span> <span class="fu">which</span>(mlt<span class="sc">$</span>MLTave <span class="sc">&gt;</span> <span class="dv">14</span>)</span>
+<span id="cb24-10"><a href="#cb24-10" aria-hidden="true" tabindex="-1"></a>mlt<span class="sc">$</span>MLTave[outlier_idx] <span class="ot">&lt;-</span> <span class="fu">mean</span>(mlt<span class="sc">$</span>MLTave[outlier_idx <span class="sc">+</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">1</span>, <span class="dv">1</span>)])</span>
+<span id="cb24-11"><a href="#cb24-11" aria-hidden="true" tabindex="-1"></a>mlt<span class="sc">$</span>MLTave_std <span class="ot">&lt;-</span> (mlt<span class="sc">$</span>MLTave <span class="sc">-</span> <span class="fu">mean</span>(mlt<span class="sc">$</span>MLTave)) <span class="sc">/</span> <span class="fu">sd</span>(mlt<span class="sc">$</span>MLTave)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>fit_sst <span class="ot">&lt;-</span> <span class="fu">fit_ssm</span>(track, </span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>               <span class="at">vmax =</span> <span class="dv">3</span>, <span class="co">#max travel rate </span></span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>               <span class="at">model =</span> <span class="st">"mp"</span>, <span class="co">#fits correlated random walk</span></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>               <span class="at">time.step =</span> <span class="fu">select</span>(mlt, id, date), <span class="co">#6 hour steps</span></span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_formula =</span> <span class="sc">~</span> MLTave_std,</span>
+<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a>               <span class="at">env_data =</span> <span class="fu">select</span>(mlt, id, date, MLTave_std), </span>
+<span id="cb25-7"><a href="#cb25-7" aria-hidden="true" tabindex="-1"></a>               <span class="at">control =</span> <span class="fu">ssm_control</span>(<span class="at">verbose =</span> <span class="dv">0</span>), </span>
+<span id="cb25-8"><a href="#cb25-8" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>fit_sst<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            Estimate Std. Error
+rho_p   -0.002985741 0.17545804
+sigma_x  0.527465504 0.09355485
+sigma_y  0.754052317 0.06994183
+rho_o    0.850990319 0.27630706
+tau_x   10.382082604 2.39301435
+tau_y    5.610716668 1.64725748
+sigma_g  0.063225415 0.01963316
+beta     0.008299704 0.01812582</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>est <span class="ot">&lt;-</span> fit_sst<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">1</span>]</span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>se <span class="ot">&lt;-</span> fit_sst<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>par[<span class="st">"beta"</span>, <span class="dv">2</span>]</span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a><span class="fu">pnorm</span>(est, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> se, <span class="at">lower.tail =</span> <span class="cn">TRUE</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 0.6764857</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">plot</span>(fit_sst, <span class="at">type =</span> <span class="dv">3</span>)<span class="sc">$</span>H391</span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>p <span class="sc">+</span></span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(date, MLTave <span class="sc">/</span> <span class="fu">max</span>(MLTave)), mlt) <span class="sc">+</span></span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">sec.axis =</span> <span class="fu">sec_axis</span>(<span class="sc">~</span> . <span class="sc">*</span> <span class="fu">max</span>(mlt<span class="sc">$</span>MLTave), <span class="at">name =</span> <span class="st">"MLT (degC)"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="broad-sw_files/figure-html/unnamed-chunk-2-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>The mixed layer average temperature model isn’t significant. Check the fit of this model compared to the SW model:</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>fit<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>AICc</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 1374.708</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a>fit_sst<span class="sc">$</span>ssm<span class="sc">$</span>H391<span class="sc">$</span>AICc</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 1409.877</code></pre>
+</div>
+</div>
+<p>SW model is a better fit.</p>
 <section id="next-step-the-fine-scale." class="level4">
 <h4 class="anchored" data-anchor-id="next-step-the-fine-scale.">Next step: the fine scale.</h4>
 <p>We will fit a hidden markov model to the seal’s diving behavior and allow the properties of the sperm whale clicks (received level and peak frequency, both associated with how far away the whales are) to influence her transition probabilities.</p>
