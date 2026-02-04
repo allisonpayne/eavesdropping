@@ -1,4 +1,5 @@
 library(momentuHMM)
+library(tidyverse)
 source(here::here("R/dives.R"))
 
 depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), 

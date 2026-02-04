@@ -204,10 +204,10 @@ rod <- read_csv(here::here("data/MoreDeployments/H391-RoD/2023228_240257_aniMotu
 
 rod_track <- as.lines(rod)
 
-basemap(limits = c(-163, -121, 36.5, 51),
+basemap(limits = c(-163, -121, 33, 58),
         bathymetry = TRUE,
         bathy.style = "rcb") +
-  geom_spatvector(data = pm_track, color = "lightblue", linewidth = 1) +
+  geom_spatvector(data = pm_track, color = "darkblue", linewidth = 1) +
   geom_spatvector(data = rod_track, color = "lightskyblue", linewidth = 1) +
   geom_spatvector(data = pb_track, color = "gold", linewidth = 1) +
   xlab("Longitude") + 
