@@ -73,3 +73,81 @@ Example output:
 ![](images/dive2208.png)
 
 To fix: put the actual date at the bottom, and not just the time; add an option to fix the scale of the y axis so that it is easier to make comparisons across dives.
+
+Now look at the difference in flow noise between dive types:
+
+```{r}
+source(here::here("R/dive_db.R"))
+theme_set(theme_bw())
+
+ben_travel <- read_csv(here::here("data/flownoise/benthic-travel.csv")) 
+ben_forage <- read_csv(here::here("data/flownoise/benthic-forage.csv")) %>% 
+  rename(Time = 1)
+ben_rest <- read_csv(here::here("data/flownoise/benthic-rest.csv")) %>% 
+  rename(Time = 1)
+pel_forage <- read_csv(here::here("data/flownoise/pelagic-forage.csv")) %>% 
+  rename(Time = 1)
+pel_trav_u <- read_csv(here::here("data/flownoise/pelagic-u-travel.csv")) %>% 
+  rename(Time = 1)
+pel_rest <- read_csv(here::here("data/flownoise/pelagic-rest.csv")) %>% 
+  rename(Time = 1)
+pel_trav_v <- read_csv(here::here("data/flownoise/pelagic-v-travel.csv")) %>% 
+  rename(Time = 1)
+
+ben_travel_plot <- dive_db_plot(ben_travel)
+ben_forage_plot <- dive_db_plot(ben_forage)
+ben_rest_plot <- dive_db_plot(ben_rest)
+pel_forage_plot <- dive_db_plot(pel_forage)
+pel_u_travel_plot <- dive_db_plot(pel_trav_u)
+pel_v_travel_plot <- dive_db_plot(pel_trav_v)
+pel_rest_plot <- dive_db_plot(pel_rest)
+
+plot_grid(ben_travel_plot, ben_forage_plot, ben_rest_plot, 
+          pel_forage_plot, pel_u_travel_plot, pel_v_travel_plot, pel_rest_plot)
+```
+
+```{r}
+library(dtw)
+source(here::here("R/dive_db.R"))
+
+db_all_dives <- dir(here::here("data/flownoise"), full.names = TRUE) %>% 
+  map(\(path) {
+    path %>% 
+      read_csv() %>% 
+      rename(Time = 1) %>% 
+      dive_db() %>% 
+      mutate(id = path)
+  }) %>% 
+  bind_rows() %>% 
+  mutate(id = basename(id))
+
+dive_ids <- unique(db_all_dives$id)
+n_dives <- length(dive_ids)
+dive_list <- db_all_dives %>% 
+  select(id, db_1000_3500) %>% 
+  group_split(id)
+
+dtw_dist_mtx <- matrix(0, nrow = n_dives, ncol = n_dives)
+for (i in 1:(n_dives - 1)) {
+  for (j in (i + 1):n_dives) {
+    dtw_dist_mtx[i, j] <- dtw(dive_list[[i]]$db_1000_3500, 
+                              dive_list[[j]]$db_1000_3500)$distance
+    dtw_dist_mtx[j, i] <- dtw_dist_mtx[i, j]
+  }
+}
+rownames(dtw_dist_mtx) <- dive_ids
+dtw_dist <- as.dist(dtw_dist_mtx)
+
+# Purely for visualization purposes
+# You're going to use fuzzy cmeans
+# exaaaaaaactly
+plot(hclust(dtw_dist))
+
+```
+
+For all dives:
+
+```{r}
+all_dive_db <- read_csv("")
+
+```

@@ -3,55 +3,70 @@ library(ggOceanMaps)
 library(terra)
 library(tidyterra)
 library(lubridate)
+library(aniMotum)
 library(geosphere)
+library(momentuHMM)
+
 
 track <- read_csv(here::here("data/seal_locations.csv"),
-                 show_col_types = FALSE)
+                  show_col_types = FALSE) %>% 
+  mutate(lc = c("G"), 
+         id = c("H391")) %>% 
+  format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
+  as.data.frame()
 
-benthic_start <- as.POSIXct("2025-03-02 16:00:00")
-benthic_end <- as.POSIXct("2025-03-30 18:00:00")
+page_start <- as.POSIXct("2025-02-21 06:00", tz = "US/Pacific")
 
-track <- track %>% 
-  filter(Date_es > benthic_start & Date_es < benthic_end) 
+ssm_steps <- tibble(
+  id = "H391", 
+  date = seq(page_start, max(track$date), by = 3600 * 6)
+)
 
-track_sf <- track %>% 
-  vect(geom = c("Longitude", "Latitude"), 
-       crs = "epsg:4326")
+fit <- fit_ssm(track, 
+               vmax = 3, #max travel rate 
+               model = "crw", #fits correlated random walk
+               time.step = ssm_steps, #6 hour steps
+               control = ssm_control(verbose = 0), 
+) #turns off reports
 
-trackline <- as.lines(track_sf)
+reg_locs <- grab(fit, what = "predicted")
 
-basemap(limits = c(-125.5, -124, 41.5, 43.5),
-        bathymetry = TRUE,
-        bathy.style = "rcb", 
-        crs = 4326) +
-  geom_spatvector(data = trackline, color = "gold", linewidth = 1) +
-  geom_point(data = track, aes(Longitude, Latitude), color = "darkorange") +
-  xlab("Longitude") + 
-  ylab("Latitude") +
-  theme(legend.position = "none")
-
-#now I want to know approx how far she traveled every 6 hours i guess?
+#now I want to know approx how far she traveled every 6 hours 
 track_dist <- track %>% 
-  mutate(datetime = ymd_hms(Date_es), 
-         window = floor_date(datetime, "12 hours")) %>% 
+  mutate(datetime = ymd_hms(date), 
+         window = floor_date(datetime, "6 hours")) %>% 
   arrange(datetime)
+
+library(geosphere)
 
 window_dists <- track_dist %>% 
   group_by(window) %>% 
   arrange(datetime) %>% 
-  mutate(distance = if(n() > 1) {
-    c(0, sapply(2:n(), function(i) {
-      distHaversine(
-        cbind(Longitude[i-1], Latitude[i-1]),
-        cbind(Longitude[i], Latitude[i])
-    )}
-    ))}
-    else { 
-      0
-      }) %>% 
-  summarize(total_dist_km = sum(distance) / 1000, 
-                                n_obs = n(), 
-                                first_time = min(datetime), 
-                                last_time = max(datetime))
+  mutate(
+    lon_prev = lag(lon),
+    lat_prev = lag(lat),
+    distance = ifelse(
+      is.na(lon_prev),
+      0,
+      distHaversine(cbind(lon_prev, lat_prev), cbind(lon, lat))
+    )
+  ) %>% 
+  summarize(
+    total_dist_km = sum(distance, na.rm = TRUE) / 1000, 
+    n_obs = n(), 
+    first_time = min(datetime), 
+    last_time = max(datetime)
+  )
+
+mean(window_dists$total_dist_km)
+quantile(window_dists$total_dist_km)
+
+# There's one clear outlier, remove it and interpolate
+outlier_idx <- which(window_dists$total_dist_km > 50)
+window_dists$total_dist_km[outlier_idx] <- mean(window_dists$total_dist_km[outlier_idx + c(-1, 1)])
+window_dists$dist_sd <- (window_dists$total_dist_km - mean(window_dists$total_dist_km)) / sd(window_dists$total_dist_km)
 
 ggplot(window_dists, aes(window, total_dist_km)) + geom_point()  
+
+mean(window_dists$total_dist_km)
+quantile(window_dists$total_dist_km)
