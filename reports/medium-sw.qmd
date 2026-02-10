@@ -43,10 +43,7 @@ dive_stats <- summarize_dives(dives)
 Filter dives to only when we had recordings.
 
 ```{r}
-recording <- read.csv(here::here("data/wav_timestamps.csv")) %>% 
-  mutate(start = ymd_hms(start_time, tz = "UTC"),
-         end = ymd_hms(end_time, tz = "UTC")) %>% 
-  drop_na(end)
+recording <- readRDS(here::here("output/recording_calib.rds"))
 
 recording_start <- recording$start[1]
 recording_end <- last(recording$end)
@@ -148,6 +145,157 @@ plot(hclust(dtw_dist))
 For all dives:
 
 ```{r}
-all_dive_db <- read_csv("")
+library(dtw)
 
+db_full_dives <- dir(here::here("data/flownoise/full_ltsa"), 
+                     full.names = TRUE)[c(10, 20, 30)] %>% 
+  read_csv() 
+
+db_dives <- db_full_dives %>% 
+  rename(Time = 1) %>% 
+  select(1, `1000`:`3500`) %>% 
+  pivot_longer(-1, names_to = "freq", values_to = "db") %>% 
+  mutate(freq = parse_number(freq),
+         pressure = 10^(db / 10)) %>% 
+  group_by(Time) %>% 
+  summarize(pressure_1000_3500 = sum(pressure)) %>% 
+  mutate(db_1000_3500 = 10 * log10(pressure_1000_3500), 
+         dive_id = cumsum(Time - lag(Time, default = Time[1]) > 1.01))
+
+dive_ids <- unique(db_dives$dive_id)
+n_dives <- length(dive_ids)
+dive_list <- db_dives %>% 
+  select(dive_id, db_1000_3500) %>% 
+  group_split(dive_id)
+
+dtw_dist_mtx <- matrix(0, nrow = n_dives, ncol = n_dives)
+for (i in 1:(n_dives - 1)) {
+  print(str_glue("{i} / {(n_dives - 1)}"))
+  for (j in (i + 1):n_dives) {
+    dtw_dist_mtx[i, j] <- dtw(dive_list[[i]]$db_1000_3500, 
+                              dive_list[[j]]$db_1000_3500)$distance
+    dtw_dist_mtx[j, i] <- dtw_dist_mtx[i, j]
+  }
+}
+rownames(dtw_dist_mtx) <- dive_ids
+dtw_dist <- as.dist(dtw_dist_mtx)
+
+# Purely for visualization purposes
+# You're going to use fuzzy cmeans
+# exaaaaaaactly
+plot(hclust(dtw_dist), )
+clust_tree <- hclust(dtw_dist)
+clusts <- cutree(clust_tree, h = 6000)
+
+```
+
+```{r}
+library(stats)
+
+depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), 
+                  show_col_types = FALSE) %>% 
+  drop_na(Depth) %>% 
+  mutate(Date = as.POSIXct(Time, format = "%H:%M:%S %d-%b-%Y", tz = "UTC")) %>% 
+  rename(no_zoc_depth = Depth,
+         Depth = `Corrected Depth`)
+
+recording <- readRDS(here::here("output/recording_calib.rds"))
+
+depth <- depth %>% 
+  filter(between(Date, recording_start, recording_end))
+
+source(here::here("R/dives.R"))
+
+dives <- get_dives(depth, 5, 80)
+dive_summ <- dives %>% 
+  group_by(dive_id) %>% 
+  summarize(start = first(Date),
+            end = last(Date))
+
+# Associate dives between acoustics and depth profiles
+dive_clusts <- db_dives %>% 
+  group_by(dive_id) %>% 
+  summarize(start = first(Time),
+            end = last(Time)) %>% 
+  mutate(
+    clust = clusts,
+    recording_end = recording$end_calib[
+      approx(recording$end,
+             seq_along(recording$end),
+             xout = end,
+             method = "constant",
+             f = 1)$y
+    ],
+    dive_id = approx(dive_summ$end,
+                     dive_summ$dive_id,
+                     xout = recording_end,
+                     method = "constant",
+                     f = 1)$y)
+
+dives %>% 
+  right_join(select(dive_clusts, dive_id, clust), by = "dive_id") %>% 
+  group_by(dive_id) %>% 
+  mutate(elapsed = as.numeric(Date - first(Date), unit = "secs")) %>% 
+  ungroup() %>% 
+  ggplot(aes(elapsed, Depth, group = dive_id)) +
+  geom_line(alpha = 0.2) +
+  scale_y_reverse() +
+  facet_wrap(~clust, scales = "free") +
+  theme_classic()
+
+#cluster 1 
+dives %>% 
+  filter(dive_id == 27:30) %>% 
+  ggplot(aes(Date, Depth)) +
+  geom_line(linewidth = 1) +
+  scale_y_reverse() +
+  theme_bw()
+
+#cluster 2
+dives %>% 
+  filter(dive_id == 1:11) %>% 
+  ggplot(aes(Date, Depth)) +
+  geom_line(linewidth = 1) +
+  scale_y_reverse() +
+  theme_bw()
+
+#cluster 3
+dives %>% 
+  filter(dive_id == 12) %>% 
+  ggplot(aes(Date, Depth)) +
+  geom_line(linewidth = 1) +
+  scale_y_reverse() +
+  theme_bw()
+
+#cluster 4
+dives %>% 
+  filter(dive_id == 101:105) %>% 
+  ggplot(aes(Date, Depth)) +
+  geom_line(linewidth = 1) +
+  scale_y_reverse() +
+  theme_bw()
+
+#cluster 5
+dives %>% 
+  filter(dive_id == 76:79) %>% 
+  ggplot(aes(Date, Depth)) +
+  geom_line(linewidth = 1) +
+  scale_y_reverse() +
+  theme_bw()
+
+#cluster 6
+dives %>% 
+  filter(dive_id == 112:115) %>% 
+  ggplot(aes(Date, Depth)) +
+  geom_line(linewidth = 1) +
+  scale_y_reverse() +
+  theme_bw()
+
+#cluster 7
+dives %>% 
+  filter(dive_id == 169:175) %>% 
+  ggplot(aes(Date, Depth)) +
+  geom_line(linewidth = 1) +
+  scale_y_reverse() +
+  theme_bw()
 ```
