@@ -3,7 +3,8 @@ library(cowplot)
 source(here::here("R/dive_db.R"))
 theme_set(theme_bw())
 
-ben_travel <- read_csv(here::here("data/flownoise/benthic-travel.csv")) 
+ben_travel <- read_csv(here::here("data/flownoise/benthic-travel.csv"))  %>% 
+  rename(Time = 1)
 ben_forage <- read_csv(here::here("data/flownoise/benthic-forage.csv")) %>% 
   rename(Time = 1)
 ben_rest <- read_csv(here::here("data/flownoise/benthic-rest.csv")) %>% 

@@ -23,24 +23,24 @@ dives <- get_dives(depth, 5, 80)
 
 
 # estimate clock offset/drift
+trigger_depth <- 40
 asc_trigger <- depth$Date[lead(depth$Depth, default = 0) < trigger_depth &
                             depth$Depth >= trigger_depth]
-recording_end_adj <- recording$end + clock_offset +
-  clock_drift * as.numeric(recording$end - recording$end[1], unit = "secs")
 nearest_trigger <- asc_trigger[
-  sapply(recording_end_adj, \(t) {
+  sapply(recording$end, \(t) {
     which.min(abs(as.numeric(t - asc_trigger, unit = "secs")))
   })
 ]
-recording_elapsed <- as.numeric(recording_end_adj - depth$Date[1], unit = "secs")
-trigger_error <- as.numeric(nearest_trigger - recording_end_adj, unit = "secs")
+recording_elapsed <- as.numeric(recording$end - depth$Date[1], unit = "secs")
+trigger_error <- as.numeric(nearest_trigger - recording$end, unit = "secs")
 drift_model <- lm(trigger_error ~ recording_elapsed)
 drift_model
 recording_calib <- recording %>% 
   mutate(elapsed = as.numeric(end - depth$Date[1], unit = "secs"),
          drift = predict(drift_model, newdata = recording),
          start_calib = start + drift,
-         end_calib = end + drift)
+         end_calib = end + drift) %>% 
+  select(-elapsed)
 
 p <- ggplot(depth, aes(Date, Depth)) +
   geom_rect(aes(xmin = start, xmax = end, ymin = 1, ymax = 999),
