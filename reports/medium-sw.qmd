@@ -9,16 +9,17 @@ Start with loading and plotting the dive data:
 
 ```{r}
 
-library(tidyverse)
 library(gridExtra)
-library(zoo)
+library(tidyverse)
 
-depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), 
-                  show_col_types = FALSE) %>% 
-  drop_na(Depth) %>% 
-  mutate(Date = as.POSIXct(Time, format = "%H:%M:%S %d-%b-%Y", tz = "UTC")) %>% 
-  rename(no_zoc_depth = Depth,
-         Depth = `Corrected Depth`)
+dives <- read_rds(here::here("output/processed_dives.rds"))
+
+# depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), 
+#                   show_col_types = FALSE) %>% 
+#   drop_na(Depth) %>% 
+#   mutate(Date = as.POSIXct(Time, format = "%H:%M:%S %d-%b-%Y", tz = "UTC")) %>% 
+#   rename(no_zoc_depth = Depth,
+#          Depth = `Corrected Depth`)
 
 ggplot(depth, aes(Date, Depth)) +
   geom_line(linewidth = 0.03) +
@@ -30,13 +31,13 @@ ggplot(depth, aes(Date, Depth)) +
 Functions for dive summary statistics
 
 ```{r}
-
-#turn the continuous dive record into individual dives and calculate summary stats for each dive. 
-
-source(here::here("R/dives.R"))
-
-dives <- get_dives(depth, 5, 80)
-dive_stats <- summarize_dives(dives)
+# 
+# #turn the continuous dive record into individual dives and calculate summary stats for each dive. 
+# 
+# source(here::here("R/dives.R"))
+# 
+# dives <- get_dives(depth, 5, 80)
+# dive_stats <- summarize_dives(dives)
 
 ```
 
@@ -45,8 +46,8 @@ Filter dives to only when we had recordings.
 ```{r}
 recording <- readRDS(here::here("output/recording_calib.rds"))
 
-recording_start <- recording$start[1]
-recording_end <- last(recording$end)
+recording_start <- recording$start_calib[1]
+recording_end <- last(recording$end_calib)
 
 dives <- dives %>% 
   filter(between(Date, recording_start, recording_end))
@@ -58,10 +59,19 @@ Generate images for dive typing.
 ```{r}
 source(here::here("R/dive_type_plots.R"))
 
-#Plots were generated and saved to outputs folder 
+test_data <- dives %>% filter(dive_id %in% 500:550)
+dive_type_plot(test_data, 525, -2:2)
 
-# walk(unique(dives$dive_id), 
-#      \(fd) dive_type_plot(dives, fd, -2:2))
+last_dives <- dives %>% filter(dive_id %in% 1000:last(dive_id))
+
+#Plots were generated and saved to outputs folder
+
+#sometimes there is a memory issue 
+walk(unique(last_dives$dive_id),
+     \(fd) {
+       dive_type_plot(dives, fd, -2:2)
+       Sys.sleep(0.01)  # Small delay between plots
+     })
 
 ```
 
