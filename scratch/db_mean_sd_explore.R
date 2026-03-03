@@ -216,6 +216,9 @@ profile_dend <- as.dendrogram(profile_tree)
 labels(profile_dend) <- types_in_order[labels(profile_dend)]
 plot(profile_dend)
 
+
+
+
 # PSD
 library(psd)
 benthic_flow_noise <- rbind(
