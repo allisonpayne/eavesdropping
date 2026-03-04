@@ -33,7 +33,7 @@ source(here::here("R/broad_funcs.R"))
 
 #sw_comb_bouts has just sperm whales, and all nearby bouts are combined. 
 
-manual <- read.csv(here::here("data/sw_comb_bouts.csv")) 
+manual <- read.csv(here::here("data/SWCombBouts_Validated.csv")) 
 
 #convert times to POSIXct and add boutID
 manual <- manual %>% 
@@ -58,7 +58,7 @@ tpws <- tpws %>%
 
 ggplot(tpws, aes(clicktime)) + 
   geom_histogram(color = "white", fill = "gray") +
-  geom_line(data = sw_manual, aes(date, SW * 800), color = "hotpink") +
+  geom_line(data = sw_manual, aes(date, SW * 700), color = "hotpink") +
   theme_bw()
 ```
 

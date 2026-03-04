@@ -10,95 +10,72 @@ depth <- read_csv(here::here("data/23A1302/out-Archive.csv"),
          Depth = `Corrected Depth`)
 
 dives <- get_dives(depth, 5, 80) 
-dive_stats <- summarize_dives(dives)
+dive_stats <- summarize_dives(dives) %>% 
+  mutate(ID = 1)
 
-dive_prepped <- prepData(data = dive_stats, 
+dive_type <- read_csv(here::here("data/manual-dive-type.csv")) %>% 
+  select(-c(AcousticsUsed, Notes)) %>% 
+  mutate(ID = 1,
+         Benthic_Pelagic_int = unclass(factor(Benthic_Pelagic, 
+                                              levels = c("Benthic", 
+                                                         "Pelagic"))),
+         Rest_Forage_Travel_int = unclass(factor(Rest_Forage_Travel, 
+                                                 levels = c("Rest", 
+                                                            "Forage",
+                                                            "Travel"))))
+
+dive_prepped <- prepData(data = dive_type, 
                          coordNames = NULL)
 
+##### 6 State Model #####
+# Define initial parameters
+nbStates <- 6  # number of hidden states
+
+# Fit HMM
+# order of initial states is BR, BF, BT, PR,PF, PT
+one <- 0.99
+zero <- function(k) (1 - one) / (k - 1)
+cat_pars <- list(
+  Benthic_Pelagic_int = rep(c(one, zero(2)), each = 3),
+  Rest_Forage_Travel_int = c(
+    # P(Rest)   for states BR, BF, BT, PR, PF, PT
+    one,     zero(3), zero(3), one,     zero(3), zero(3),
+    # P(Forage) for states BR, BF, BT, PR, PF, PT
+    zero(3), one,     zero(3), zero(3), one,     zero(3)
+    # P(Travel) implied: high for BT and PT, low elsewhere
+  )
+)
+
+hmm_fit6 <- fitHMM(data = dive_prepped,
+                   nbStates = nbStates,
+                   dist = list(Benthic_Pelagic_int = "cat2", 
+                               Rest_Forage_Travel_int = "cat3"), 
+                   Par0 = cat_pars)
+
+hmm_fit6
+
+##### 3 state model #####
 # Define initial parameters
 nbStates <- 3  # number of hidden states
 
 # Fit HMM
-hmm_fit <- fitHMM(data = dive_prepped,
-                  nbStates = nbStates,
-                  dist = list(mean_depth = "gamma", 
-                              n_bottom_wiggles = "gamma", 
-                              bottom_duration_min = "gamma"), 
-                  Par0 = list(
-                    #travel, rest, forage
-                    mean_depth = c(350, 400, 600, 20, 20, 20),
-                    n_bottom_wiggles = c(50, 10, 150, 20, 20, 20), 
-                    bottom_duration_min = c(10, 20, 15, 1, 1, 1)
-                  ))  # initial parameter values
+# order of initial states is BR, BF, BT, PR,PF, PT
+one <- 0.99
+zero <- function(k) (1 - one) / (k - 1)
+cat_pars <- list(
+  Rest_Forage_Travel_int = c(
+    # P(R) for states R, F, T
+    one, zero(3), zero(3),
+    # P(F) for states R, F, T
+    zero(3), one, zero(3)
+    # P(T) implied
+  )
+)
 
-calculate_prominence <- function(x, peaks_matrix) {
-  # peaks_matrix is the output from pracma::findpeaks()
-  # Columns: peak_value, peak_location, peak_start, peak_end
-  
-  if (is.null(peaks_matrix) || nrow(peaks_matrix) == 0) {
-    return(numeric(0))
-  }
-  
-  n_peaks <- nrow(peaks_matrix)
-  prominences <- numeric(n_peaks)
-  
-  for (i in 1:n_peaks) {
-    peak_height <- peaks_matrix[i, 1]
-    peak_loc <- peaks_matrix[i, 2]
-    peak_start <- peaks_matrix[i, 3]
-    peak_end <- peaks_matrix[i, 4]
-    
-    # Find the highest valley on the left side
-    if (peak_start > 1) {
-      left_min <- min(x[peak_start:peak_loc])
-    } else {
-      left_min <- x[1]
-    }
-    
-    # Find the highest valley on the right side
-    if (peak_end < length(x)) {
-      right_min <- min(x[peak_loc:peak_end])
-    } else {
-      right_min <- x[length(x)]
-    }
-    
-    # Prominence is the peak height minus the higher of the two valleys
-    key_col <- max(left_min, right_min)
-    prominences[i] <- peak_height - key_col
-  }
-  
-  return(prominences)
-}
-foo <- filter(dives, dive_id == 72)
-foo_peaks <- pracma::findpeaks(-foo$Depth, zero = "+")
-peak_prom <- calculate_prominence(-foo$Depth, foo_peaks)
-is_wiggle <- peak_prom >= 1.0
-wiggles <- slice(foo, foo_peaks[is_wiggle, 2])
-ggplot(foo, aes(Date, Depth)) +
-  geom_line() +
-  geom_point(data = wiggles, col = "red") +
-  scale_y_reverse() +
-  scale_x_datetime(date_labels = "%m-%d %H:%M")
+hmm_fit3 <- fitHMM(data = dive_prepped,
+                   nbStates = nbStates,
+                   dist = list(Rest_Forage_Travel_int = "cat3"), 
+                   Par0 = cat_pars,
+                   stateNames = c("Rest", "Forage", "Travel"))
+hmm_fit3
 
-# PSD of two dives - putative forage and travel
-library(tuneR)
-library(seewave)
-
-wav <- readWave("/Users/allisonpayne/Local Documents/Science/Eavesdropping/Flow noise/BenthicTravel_20250221_184334.WAV")
-signal <- wav@left
-n <- length(signal)
-start <- floor(0.25 * n)
-end   <- floor(0.75 * n)
-signal_mid <- signal[start:end]
-signal_bp <- bwfilter(signal_mid,
-                      f = fs,
-                      from = 1000,
-                      to = 2000,
-                      bandpass = TRUE,
-                      n = 4)   # filter order
-fs <- wav@samp.rate
-divespec <- meanspec(signal_bp, f = fs, plot = FALSE)
-divespec_df <- data.frame(freq = divespec[, 1], amp = divespec[, 2])
-ggplot(divespec_df, aes(freq, amp)) + 
-  geom_line() +
-  xlim()
