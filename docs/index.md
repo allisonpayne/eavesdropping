@@ -1,5 +1,5 @@
-[Broad scale analysis](broad-sw.html)
+[Movement behavior](broad-sw.html)
 
-[Fine scale analysis](fine-sw.html)
+[Dive behavior](medium-sw.html)
 
-[Dive visualization](medium-sw.html)
+[Click analysis](fine-sw.html)
