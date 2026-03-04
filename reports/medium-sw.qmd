@@ -1,246 +1,68 @@
 ---
-title: "Dive visualization"
+title: "Dive behavior"
 format: html
 editor_options: 
   chunk_output_type: console
+execute: 
+  warning: false
 ---
 
-Start with loading and plotting the dive data:
+Use `momentuHMM` to fit a Hidden Markov Model to the dive data.
+
+First, read in and prep the data.
 
 ```{r}
+#| label: setup
+#| message: false
 
-library(gridExtra)
+library(momentuHMM)
 library(tidyverse)
-
-dives <- read_rds(here::here("output/processed_dives.rds"))
-
-# depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), 
-#                   show_col_types = FALSE) %>% 
-#   drop_na(Depth) %>% 
-#   mutate(Date = as.POSIXct(Time, format = "%H:%M:%S %d-%b-%Y", tz = "UTC")) %>% 
-#   rename(no_zoc_depth = Depth,
-#          Depth = `Corrected Depth`)
-
-ggplot(depth, aes(Date, Depth)) +
-  geom_line(linewidth = 0.03) +
-  scale_y_reverse() +
-  theme_bw()
-
-```
-
-Functions for dive summary statistics
-
-```{r}
-# 
-# #turn the continuous dive record into individual dives and calculate summary stats for each dive. 
-# 
-# source(here::here("R/dives.R"))
-# 
-# dives <- get_dives(depth, 5, 80)
-# dive_stats <- summarize_dives(dives)
-
-```
-
-Filter dives to only when we had recordings.
-
-```{r}
-recording <- readRDS(here::here("output/recording_calib.rds"))
-
-recording_start <- recording$start_calib[1]
-recording_end <- last(recording$end_calib)
-
-dives <- dives %>% 
-  filter(between(Date, recording_start, recording_end))
-
-```
-
-Generate images for dive typing.
-
-```{r}
-source(here::here("R/dive_type_plots.R"))
-
-test_data <- dives %>% filter(dive_id %in% 500:550)
-dive_type_plot(test_data, 525, -2:2)
-
-last_dives <- dives %>% filter(dive_id %in% 1000:last(dive_id))
-
-#Plots were generated and saved to outputs folder
-
-#sometimes there is a memory issue 
-walk(unique(last_dives$dive_id),
-     \(fd) {
-       dive_type_plot(dives, fd, -2:2)
-       Sys.sleep(0.01)  # Small delay between plots
-     })
-
-```
-
-Example output:
-
-![](images/dive2208.png)
-
-To fix: put the actual date at the bottom, and not just the time; add an option to fix the scale of the y axis so that it is easier to make comparisons across dives.
-
-Now look at the difference in flow noise between dive types:
-
-```{r}
-source(here::here("R/dive_db.R"))
-theme_set(theme_bw())
-
-ben_travel <- read_csv(here::here("data/flownoise/benthic-travel.csv")) 
-ben_forage <- read_csv(here::here("data/flownoise/benthic-forage.csv")) %>% 
-  rename(Time = 1)
-ben_rest <- read_csv(here::here("data/flownoise/benthic-rest.csv")) %>% 
-  rename(Time = 1)
-pel_forage <- read_csv(here::here("data/flownoise/pelagic-forage.csv")) %>% 
-  rename(Time = 1)
-pel_trav_u <- read_csv(here::here("data/flownoise/pelagic-u-travel.csv")) %>% 
-  rename(Time = 1)
-pel_rest <- read_csv(here::here("data/flownoise/pelagic-rest.csv")) %>% 
-  rename(Time = 1)
-pel_trav_v <- read_csv(here::here("data/flownoise/pelagic-v-travel.csv")) %>% 
-  rename(Time = 1)
-
-ben_travel_plot <- dive_db_plot(ben_travel)
-ben_forage_plot <- dive_db_plot(ben_forage)
-ben_rest_plot <- dive_db_plot(ben_rest)
-pel_forage_plot <- dive_db_plot(pel_forage)
-pel_u_travel_plot <- dive_db_plot(pel_trav_u)
-pel_v_travel_plot <- dive_db_plot(pel_trav_v)
-pel_rest_plot <- dive_db_plot(pel_rest)
-
-plot_grid(ben_travel_plot, ben_forage_plot, ben_rest_plot, 
-          pel_forage_plot, pel_u_travel_plot, pel_v_travel_plot, pel_rest_plot)
-```
-
-```{r}
-library(dtw)
-source(here::here("R/dive_db.R"))
-
-db_all_dives <- dir(here::here("data/flownoise"), full.names = TRUE) %>% 
-  map(\(path) {
-    path %>% 
-      read_csv() %>% 
-      rename(Time = 1) %>% 
-      dive_db() %>% 
-      mutate(id = path)
-  }) %>% 
-  bind_rows() %>% 
-  mutate(id = basename(id))
-
-dive_ids <- unique(db_all_dives$id)
-n_dives <- length(dive_ids)
-dive_list <- db_all_dives %>% 
-  select(id, db_1000_3500) %>% 
-  group_split(id)
-
-dtw_dist_mtx <- matrix(0, nrow = n_dives, ncol = n_dives)
-for (i in 1:(n_dives - 1)) {
-  for (j in (i + 1):n_dives) {
-    dtw_dist_mtx[i, j] <- dtw(dive_list[[i]]$db_1000_3500, 
-                              dive_list[[j]]$db_1000_3500)$distance
-    dtw_dist_mtx[j, i] <- dtw_dist_mtx[i, j]
-  }
-}
-rownames(dtw_dist_mtx) <- dive_ids
-dtw_dist <- as.dist(dtw_dist_mtx)
-
-# Purely for visualization purposes
-# You're going to use fuzzy cmeans
-# exaaaaaaactly
-plot(hclust(dtw_dist))
-
-```
-
-For all dives:
-
-```{r}
-library(dtw)
-
-db_full_dives <- dir(here::here("data/flownoise/full_ltsa"), 
-                     full.names = TRUE)[c(10, 20, 30)] %>% 
-  read_csv() 
-
-db_dives <- db_full_dives %>% 
-  rename(Time = 1) %>% 
-  select(1, `1000`:`3500`) %>% 
-  pivot_longer(-1, names_to = "freq", values_to = "db") %>% 
-  mutate(freq = parse_number(freq),
-         pressure = 10^(db / 10)) %>% 
-  group_by(Time) %>% 
-  summarize(pressure_1000_3500 = sum(pressure)) %>% 
-  mutate(db_1000_3500 = 10 * log10(pressure_1000_3500), 
-         dive_id = cumsum(Time - lag(Time, default = Time[1]) > 1.01))
-
-dive_ids <- unique(db_dives$dive_id)
-n_dives <- length(dive_ids)
-dive_list <- db_dives %>% 
-  select(dive_id, db_1000_3500) %>% 
-  group_split(dive_id)
-
-dtw_dist_mtx <- matrix(0, nrow = n_dives, ncol = n_dives)
-for (i in 1:(n_dives - 1)) {
-  print(str_glue("{i} / {(n_dives - 1)}"))
-  for (j in (i + 1):n_dives) {
-    dtw_dist_mtx[i, j] <- dtw(dive_list[[i]]$db_1000_3500, 
-                              dive_list[[j]]$db_1000_3500)$distance
-    dtw_dist_mtx[j, i] <- dtw_dist_mtx[i, j]
-  }
-}
-rownames(dtw_dist_mtx) <- dive_ids
-dtw_dist <- as.dist(dtw_dist_mtx)
-
-# Purely for visualization purposes
-# You're going to use fuzzy cmeans
-# exaaaaaaactly
-plot(hclust(dtw_dist), )
-clust_tree <- hclust(dtw_dist)
-clusts <- cutree(clust_tree, h = 6000)
-
-```
-
-```{r}
-library(stats)
-
-depth <- read_csv(here::here("data/23A1302/out-Archive.csv"), 
-                  show_col_types = FALSE) %>% 
-  drop_na(Depth) %>% 
-  mutate(Date = as.POSIXct(Time, format = "%H:%M:%S %d-%b-%Y", tz = "UTC")) %>% 
-  rename(no_zoc_depth = Depth,
-         Depth = `Corrected Depth`)
-
-recording <- readRDS(here::here("output/recording_calib.rds"))
-
-depth <- depth %>% 
-  filter(between(Date, recording_start, recording_end))
-
 source(here::here("R/dives.R"))
 
-dives <- get_dives(depth, 5, 80)
-dive_summ <- dives %>% 
-  group_by(dive_id) %>% 
-  summarize(start = first(Date),
-            end = last(Date))
+#read in dive type data (done manually)
+dive_type <- read_csv(here::here("data/manual-dive-type.csv")) %>% 
+  select(-c(AcousticsUsed, Notes)) %>% 
+  mutate(ID = 1,
+         Benthic_Pelagic_int = unclass(factor(Benthic_Pelagic, 
+                                              levels = c("Benthic", 
+                                                         "Pelagic"))),
+         Rest_Forage_Travel_int = unclass(factor(Rest_Forage_Travel, 
+                                                 levels = c("Rest", 
+                                                            "Forage",
+                                                            "Travel"))))
 
-# Associate dives between acoustics and depth profiles
-dive_clusts <- db_dives %>% 
-  group_by(dive_id) %>% 
-  summarize(start = first(Time),
-            end = last(Time)) %>% 
-  mutate(
-    clust = clusts,
-    recording_end = recording$end_calib[
-      approx(recording$end,
-             seq_along(recording$end),
-             xout = end,
-             method = "constant",
-             f = 1)$y
-    ],
-    dive_id = approx(dive_summ$end,
-                     dive_summ$dive_id,
-                     xout = recording_end,
-                     method = "constant",
-                     f = 1)$y)
+dive_prepped <- prepData(data = dive_type, 
+                         coordNames = NULL)
+```
 
+Fit the HMM.
 
+```{r}
+#| label: fit-hmm
+
+##### 3 state model #####
+
+# Define initial parameters
+nbStates <- 3  # number of hidden states
+
+# order of initial states is Rest, Forage, Travel
+one <- 0.99
+zero <- function(k) (1 - one) / (k - 1)
+cat_pars <- list(
+  Rest_Forage_Travel_int = c(
+    # P(R) for states R, F, T
+    one, zero(3), zero(3),
+    # P(F) for states R, F, T
+    zero(3), one, zero(3)
+    # P(T) implied
+  )
+)
+
+# Fit HMM
+hmm_fit3 <- fitHMM(data = dive_prepped,
+                   nbStates = nbStates,
+                   dist = list(Rest_Forage_Travel_int = "cat3"), 
+                   Par0 = cat_pars,
+                   stateNames = c("Rest", "Forage", "Travel"))
+hmm_fit3
 ```
