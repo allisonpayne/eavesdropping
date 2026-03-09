@@ -36,10 +36,10 @@ Load in acoustic data and aggregate it at 6-hour scale
 source(here::here("R/broad_funcs.R"))
 
 #read in the general acoustic data
-acou <- read_csv(here::here("data/detections.csv"),
-                 show_col_types = FALSE) %>% 
-  mutate(start = as.POSIXct(start, tz = "US/Pacific"), 
-         end = as.POSIXct(end, tz = "US/Pacific"))
+# acou <- read_csv(here::here("data/detections.csv"),
+#                  show_col_types = FALSE) %>% 
+#   mutate(start = as.POSIXct(start, tz = "US/Pacific"), 
+#          end = as.POSIXct(end, tz = "US/Pacific"))
 
 #read in sperm whale data 
 sw_valid <- read_csv(here::here("data/SWCombBouts_Validated.csv"), 
@@ -216,7 +216,7 @@ basemap(limits = c(-163, -121, 33, 58),
 
 ```
 
-Both of the other deployements were longer trips, but many seals do go offshore on the shorter trips as well. The trip with acoustic recordings is plotted in gold.
+Both of the other deployments were longer trips, but many seals do go offshore on the shorter trips as well. The trip with acoustic recordings is plotted in gold.
 
 ### 3. Other environmental cues
 
