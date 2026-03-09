@@ -1,5 +1,7 @@
-input_csv  <- "C:/Users/mg2377/Documents/Allison_Raven/DB100_clicks_with_audiofiles.csv"
-output_dir <- "C:/Users/mg2377/Documents/Allison_Raven/raven"
+library(tidyverse)
+
+input_csv  <- here::here("data/sw/DB100_clicks_with_audiofiles.csv")
+output_dir <- here::here("data/sw/raven/")
 max_peak_freq <- 20   # only keep clicks with peak_freq_Hz <= this value
 
 # Load and filter data
