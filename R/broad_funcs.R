@@ -3,8 +3,8 @@ find_window <- function(time, start, win_hr) {
   start + n_window * window_hr * 3600 + window_hr / 2 * 3600
 }
 
-sum_odon_exposure <- function(data, win_start) {
-  win_dur <- window_hr * 3600
+sum_odon_exposure <- function(data, win_start, win_hr) {
+  win_dur <- win_hr * 3600
   odon_encounters <- data %>% 
     filter(start < win_start + win_dur,
            end > win_start)

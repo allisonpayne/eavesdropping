@@ -20,7 +20,8 @@ Loading in our GPS data and formatting it to work with `aniMotum`:
 #| label: track-data
 
 track <- read_csv(here::here("data/seal_locations.csv"),
-                  show_col_types = FALSE) %>% 
+                  show_col_types = FALSE,
+                  locale = locale(tz = "Etc/UTC")) %>% 
   mutate(lc = c("G"), 
          id = c("H391")) %>% 
   format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
@@ -35,40 +36,72 @@ Load in acoustic data and aggregate it at 6-hour scale
 
 source(here::here("R/broad_funcs.R"))
 
-#read in the general acoustic data
-# acou <- read_csv(here::here("data/detections.csv"),
-#                  show_col_types = FALSE) %>% 
-#   mutate(start = as.POSIXct(start, tz = "US/Pacific"), 
-#          end = as.POSIXct(end, tz = "US/Pacific"))
+#read in the recording details
+#wav_timestamps.csv is the output of the function get_wav_timestamps.R. 
+recording <- read.csv(here::here("data/wav_timestamps.csv")) %>% 
+                        mutate(start = ymd_hms(start_time, tz = "UTC"),
+                               end = ymd_hms(end_time, tz = "UTC")) %>% 
+                        drop_na(end)
 
 #read in sperm whale data 
-sw_valid <- read_csv(here::here("data/SWCombBouts_Validated.csv"), 
+sw_valid <- read_csv(here::here("data/sw/SWCombBouts_Validated.csv"), 
                      show_col_types = FALSE) %>% 
-  mutate(start= as.POSIXct(start, tz = "US/Pacific"), 
-         end = as.POSIXct(end, tz = "US/Pacific")) %>% 
+  mutate(start= as.POSIXct(start, tz = "UTC"), 
+         end = as.POSIXct(end, tz = "UTC"), 
+         duration = end - start) %>% 
   select(-notes)
 
 window_hr <- 6
 
-acou_agg_valid <- tibble(date = seq(first(track$date), 
-                                    last(track$date), 
+acou_agg_valid <- tibble(date = seq(first(recording$start), 
+                                    last(recording$end), 
                                     by = window_hr * 3600)) %>% 
   mutate(date2 = date - window_hr * 3600,
-         SW = map_dbl(date, \(d) sum_odon_exposure(data = sw_valid, d)),
+         SW = map_dbl(date, \(d) sum_odon_exposure(data = sw_valid, 
+                                                   win_start = d, 
+                                                   win_hr = window_hr)),
          SW_lag = lag(SW), 
          SW_lead = lead(SW), 
          SW_std = (SW - mean(SW)) / sd(SW),
          id = "H391")
 
+# acou_agg_valid <- tibble(date = seq(first(track$date), 
+#                                     last(track$date), 
+#                                     by = window_hr * 3600)) %>% 
+#   mutate(date2 = date - window_hr * 3600,
+#          SW = map_dbl(date, \(d) sum_odon_exposure(data = sw_valid, d)),
+#          SW_lag = lag(SW), 
+#          SW_lead = lead(SW), 
+#          SW_std = (SW - mean(SW)) / sd(SW),
+#          id = "H391")
+
 ```
+
+The seal recorded `sum(sw_valid$duration)` of sperm whales (out of 740 total hours of recording - about `sum(sw_valid$duration)/740`%.
 
 Trim spatial, acoustic data to audio coverage
 
 ```{r}
 #| label: trim-data
 
-track <- filter(track, date < last(acou$end))
-acou_agg_valid <- filter(acou_agg_valid, date < last(acou$end))
+track_overlap <- filter(track, between(date, 
+                                       first(acou_agg_valid$date2), 
+                                       last(acou_agg_valid$date)))
+
+```
+
+Sanity check: plot track and sperm whale bouts.
+
+```{r}
+#| label: track_bouts
+
+track_overlap %>% 
+  mutate(sw = map_dbl(date, \(d) acou_agg_valid$SW[d >= acou_agg_valid$date2 & d < acou_agg_valid$date])) %>%
+  ggplot(aes(lon, lat)) +
+  geom_path() +
+  geom_point(aes(color = sw)) +
+  scale_color_viridis_c(option = "inferno")
+  
 
 ```
 
@@ -77,13 +110,19 @@ Fit model
 ```{r}
 #| label: fit-mod
 
-fit <- fit_ssm(track, 
+fit <- fit_ssm(track_overlap, 
                vmax = 3, #max travel rate 
                model = "mp", #fits correlated random walk
-               time.step = select(acou_agg_valid, id, date), #6 hour steps
-               control = ssm_control(verbose = 0), 
-               env_formula = ~ SW,
-               env_data = select(acou_agg_valid, id, date, SW))
+               time.step = select(acou_agg_valid, id, date),
+               control = ssm_control(verbose = 0))
+
+# fit <- fit_ssm(track_overlap, 
+#                vmax = 3, #max travel rate 
+#                model = "mp", #fits correlated random walk
+#                time.step = select(acou_agg_valid, id, date), #6 hour steps
+#                control = ssm_control(verbose = 0), 
+#                env_formula = ~ SW,
+#                env_data = select(acou_agg_valid, id, date, SW))
 
 ```
 
@@ -91,9 +130,28 @@ fit <- fit_ssm(track,
 #| label: summ-mod
 
 fit$ssm$H391$par
-est <- fit$ssm$H391$par["beta", 1]
-se <- fit$ssm$H391$par["beta", 2]
-pnorm(est, mean = 0, sd = se, lower.tail = TRUE)
+# est <- fit$ssm$H391$par["beta", 1]
+# se <- fit$ssm$H391$par["beta", 2]
+# pnorm(est, mean = 0, sd = se, lower.tail = TRUE)
+
+```
+
+Instead of jointly estimating the random walk of g in the model, estimate it after fitting g.
+
+```{r}
+#| label: fit-g
+
+logit <- function(x) log(x / (1 - x))
+inv_logit <- function(x) exp(x) / (1 + exp(x))
+
+g_df <- fit$ssm$H391$predicted %>% 
+  mutate(SW = acou_agg_valid$SW,
+         logit_g = logit(g),
+         logit_g_lag = lag(logit_g)) %>% 
+  slice(-1)
+g_rw <- lm(logit_g ~ 0 + offset(logit_g_lag) + SW, g_df)
+summary(g_rw)
+
 
 ```
 
