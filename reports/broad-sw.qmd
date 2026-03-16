@@ -21,7 +21,7 @@ Loading in our GPS data and formatting it to work with `aniMotum`:
 
 track <- read_csv(here::here("data/seal_locations.csv"),
                   show_col_types = FALSE,
-                  locale = locale(tz = "Etc/UTC")) %>% 
+                  locale = locale(tz = "UTC")) %>% 
   mutate(lc = c("G"), 
          id = c("H391")) %>% 
   format_data(date = "Date_es", coord = c("Longitude", "Latitude")) %>% 
@@ -116,11 +116,12 @@ fit <- fit_ssm(track_overlap,
                time.step = select(acou_agg_valid, id, date),
                control = ssm_control(verbose = 0))
 
-# fit <- fit_ssm(track_overlap, 
-#                vmax = 3, #max travel rate 
+#this isn't working because we changed back to standard animotum 
+# fit_sw <- fit_ssm(track_overlap,
+#                vmax = 3, #max travel rate
 #                model = "mp", #fits correlated random walk
 #                time.step = select(acou_agg_valid, id, date), #6 hour steps
-#                control = ssm_control(verbose = 0), 
+#                control = ssm_control(verbose = 0),
 #                env_formula = ~ SW,
 #                env_data = select(acou_agg_valid, id, date, SW))
 
@@ -168,7 +169,7 @@ p +
 ```{r}
 #| label: plot-map
 
-ggplot(fit$ssm[[1]]$predicted) + 
+ggplot(grab(fit, as_sf = TRUE)) + 
   geom_sf(aes(color = g)) +
   scale_color_gradient2(midpoint = 0.5, limits = c(0, 1))
 ```
@@ -182,19 +183,30 @@ Maybe sperm whales and elephant seals both just happened to converge on the patc
 ```{r}
 #| label: lead-mod
 
-fit_lead <- fit_ssm(track, 
-               vmax = 3, #max travel rate 
-               model = "mp", #fits correlated random walk
-               time.step = select(acou_agg_valid, id, date), #12 hour steps
-               control = ssm_control(verbose = 0), 
-               env_formula = ~ SW_lead,
-               env_data = acou_agg_valid)
+# No need to re-fit the model anymore
+# fit_lead <- fit_ssm(track, 
+#                vmax = 3, #max travel rate 
+#                model = "mp", #fits correlated random walk
+#                time.step = select(acou_agg_valid, id, date), #12 hour steps
+#                control = ssm_control(verbose = 0), 
+#                env_formula = ~ SW_lead,
+#                env_data = acou_agg_valid)
 
 #get lead results
-fit_lead$ssm$H391$par
-est_lead <- fit_lead$ssm$H391$par["beta", 1]
-se_lead <- fit_lead$ssm$H391$par["beta", 2]
-pnorm(est_lead, mean = 0, sd = se_lead, lower.tail = TRUE)
+
+# fit_lead$ssm$H391$par
+# est_lead <- fit_lead$ssm$H391$par["beta", 1]
+# se_lead <- fit_lead$ssm$H391$par["beta", 2]
+# pnorm(est_lead, mean = 0, sd = se_lead, lower.tail = TRUE)
+
+g_df_lead <- fit$ssm$H391$predicted %>% 
+  mutate(SW_lead = acou_agg_valid$SW_lead,
+         logit_g = logit(g),
+         logit_g_lag = lag(logit_g)) %>% 
+  slice(-1)
+g_rw_lead <- lm(logit_g ~ 0 + offset(logit_g_lag) + SW_lead, 
+                g_df_lead)
+summary(g_rw_lead)
 ```
 
 ```{r}
@@ -213,6 +225,14 @@ fit_lag$ssm$H391$par
 est_lag <- fit_lag$ssm$H391$par["beta", 1]
 se_lag <- fit_lag$ssm$H391$par["beta", 2]
 pnorm(est_lag, mean = 0, sd = se_lag, lower.tail = TRUE)
+
+g_df_lag <- fit$ssm$H391$predicted %>% 
+  mutate(SW_lag = acou_agg_valid$SW_lag,
+         logit_g = logit(g),
+         logit_g_lag = lag(logit_g)) %>% 
+  slice(-1)
+g_rw_lag <- lm(logit_g ~ 0 + offset(logit_g_lag) + SW_lag, g_df_lag)
+summary(g_rw_lag)
 ```
 
 A model fitted to the lag/lead values are not at *all* significant (.5-.6 one-tailed p-test), while the model fitted to the actual values is (0.03, 1 tailed p test).
@@ -290,7 +310,9 @@ mlt <- mlt %>%
                         format = "%H:%M:%S %d-%b-%Y", 
                         tz = "UTC"), 
          id = "H391") %>% 
-  filter(date < last(acou$end))
+   filter(between(date, 
+                  first(acou_agg_valid$date2), 
+                  last(acou_agg_valid$date)))
 
 # There's one clear outlier in MLT temperature, remove it and interpolate
 outlier_idx <- which(mlt$MLTave > 14)
@@ -314,6 +336,14 @@ fit_sst$ssm$H391$par
 est <- fit_sst$ssm$H391$par["beta", 1]
 se <- fit_sst$ssm$H391$par["beta", 2]
 pnorm(est, mean = 0, sd = se, lower.tail = TRUE)
+
+g_df_mlt <- fit$ssm$H391$predicted %>% 
+  mutate(mlt = mlt$MLTave,
+         logit_g = logit(g),
+         logit_g_lag = lag(logit_g)) %>% 
+  slice(-1)
+g_rw_mlt <- lm(logit_g ~ 0 + offset(logit_g_lag) + mlt, g_df_mlt)
+summary(g_rw_mlt)
 ```
 
 ```{r}

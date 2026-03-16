@@ -1,0 +1,175 @@
+---
+title: "broad-sw-new"
+format: html
+---
+
+Does elephant seal movement change in the presence of sperm whale clicks?
+
+```{r}
+#| label: setup
+#| message: false
+
+library(aniMotum)
+library(tidyverse)
+library(terra)
+library(tidyterra)
+library(argosfilter)
+
+theme_set(theme_bw())
+```
+
+Formatting location data (a mix of GPS and Argos). Based on Storrie et al., 2025 and the Wildlife Computers documentation.
+
+```{r}
+track <- read_csv(here::here("data/255226-gps-1/H391-255226-1-Locations.csv"),
+                  show_col_types = FALSE,
+                  locale = locale(tz = "UTC")) %>% 
+  #remove Argos locations with no associate ellipse error values and GPS locations with fewer than 4 sattelites. 
+  filter(!(Type == "Argos" & is.na(`Error Ellipse Orientation`)), 
+         !(Type == "FastGPS" & suppressWarnings(as.numeric(Quality) < 4))) %>% 
+#Warning because as.numeric() converts the Argos quality estimates to NAs
+  mutate(Date = parse_date_time(Date, 
+                                orders = c("H:M:S.OS d-b-Y", 
+                                           "H:M:S d-b-Y")))
+
+#Remove locations that would require unrealistic swimming speeds (>3m/s)
+track_filtered <- track %>% 
+  arrange(Date) %>% 
+  mutate(filter_flag = sdafilter(
+    lat = Latitude, 
+    lon = Longitude, 
+    dtime = Date, 
+    lc = Quality,
+    vmax = 3
+  )) %>% 
+  filter(filter_flag == "not") %>% #keep only realistic locations 
+  ungroup()
+```
+
+Read in recording details and clip track to recording time.
+
+```{r}
+#| label: acou-data
+
+#read in the recording details
+#wav_timestamps.csv is the output of get_wav_timestamps.R. 
+recording <- read.csv(here::here("data/wav_timestamps.csv")) %>% 
+  mutate(start = ymd_hms(start_time, tz = "UTC"),
+         end = ymd_hms(end_time, tz = "UTC")) %>% 
+  drop_na(end)
+
+#filter the track to only when the acoustic tag was recording
+track_overlap <- filter(track_filtered, between(Date, 
+                                       first(recording$start),
+                                       last(recording$end)))
+
+#on average, during the recording period, how often did we get a filtered location?
+avg_loc_timing <- track_overlap %>% 
+  mutate(interval = as.numeric(difftime(Date, 
+                                        lag(Date), 
+                                        units = "hours"))) %>% 
+  summarize(mean_interval_hrs = mean(interval, na.rm = TRUE)) %>% 
+  round(1)
+```
+
+On average, we got a filtered location every `r avg_loc_timing$mean_interval_hrs` hours.
+
+```{r}
+#| label: plot-track-initial
+
+track_overlap %>%
+  ggplot(aes(Longitude, Latitude)) +
+  geom_path() 
+
+```
+
+Format track data for `aniMotum`.
+
+```{r}
+#| label: format-track-animotum
+
+track_formatted <- track_overlap %>% 
+  mutate(id = c("H391"), 
+         `Error Radius` = if_else(Type == "FastGPS", 50, `Error Radius`), 
+         Quality = if_else(Type == "FastGPS", "G", Quality)) %>% 
+  format_data(date = "Date", 
+              coord = c("Longitude", "Latitude"), 
+              lc = "Quality") %>% 
+  as.data.frame()
+```
+
+```{r}
+#| label: fit-initial-ssm
+
+fit <- fit_ssm(track_formatted, 
+               vmax = 3, #max travel rate 
+               model = "mp", #fits correlated random walk
+               time.step = 6,
+               control = ssm_control(verbose = 0))
+
+summary(fit)
+p1 <- plot(fit, type = 3)$H391
+p2 <- ggplot(grab(fit, as_sf = TRUE)) + 
+  geom_sf(aes(color = g)) +
+  scale_color_gradient2(midpoint = 0.5, limits = c(0, 1))
+
+p1
+```
+
+Now read in the manual detections of sperm whales.
+
+```{r}
+source(here::here("R/broad_funcs.R"))
+
+sw_valid <- read_csv(here::here("data/sw/SWCombBouts_Validated.csv"), 
+                     show_col_types = FALSE) %>% 
+  mutate(start= as.POSIXct(start, tz = "UTC"), 
+         end = as.POSIXct(end, tz = "UTC"), 
+         duration = end - start) %>% 
+  select(-notes)
+
+window_hr <- 6
+acou_agg_valid <- tibble(date = seq(first(recording$start), 
+                                    last(recording$end), 
+                                    by = window_hr * 3600)) %>% 
+  mutate(date2 = date - window_hr * 3600,
+         SW = map_dbl(date, \(d) sum_odon_exposure(data = sw_valid, 
+                                                   win_start = d, 
+                                                   win_hr = window_hr)),
+         SW_lag = lag(SW), 
+         SW_lead = lead(SW), 
+         SW_std = (SW - mean(SW)) / sd(SW),
+         id = "H391")
+
+total_sw_hrs <- round(sum(as.numeric(sw_valid$duration)), 1)
+```
+
+The seal recorded `r total_sw_hrs` of sperm whales (out of 740 total hours of recording - about `r round(total_sw_hrs/740 * 100, 1)`% of the time).
+
+Plot the track with SW bouts.
+
+```{r}
+#| label: track_bouts
+
+track_overlap_sw <- track_overlap %>% 
+  left_join(
+    acou_agg_valid %>% select(date2, SW),
+    join_by(closest(Date >= date2))
+  ) %>% 
+  rename(sw = SW) %>%
+  ggplot(aes(Longitude, Latitude)) +
+  geom_path() +
+  geom_point(aes(color = sw)) +
+  scale_color_viridis_c(option = "inferno")
+
+```
+
+Plot movement persistence with SW presence (just for visualization purposes).
+
+```{r}
+p_sw <- plot(fit, type = 3)$H391 +
+  geom_point(aes(date, SW / max(SW)), acou_agg_valid) +
+  scale_y_continuous(sec.axis = sec_axis(~ . * max(acou_agg_valid$SW), name = "SW (hours)"))
+
+cowplot::plot_grid(track_overlap_sw, p_sw, ncol = 2, rel_widths = c(2, 5))
+```
