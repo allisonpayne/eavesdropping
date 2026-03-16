@@ -79,3 +79,13 @@ hmm_fit3 <- fitHMM(data = dive_prepped,
                    stateNames = c("Rest", "Forage", "Travel"))
 hmm_fit3
 
+#version with sw click presence absence
+
+clicks_by_dive <- read_csv(here::here("data/sw/clicks_by_dive.csv"))
+
+hmm_fit_sw <- fitHMM(data = dive_prepped,
+                   nbStates = nbStates,
+                   formula = 
+                   dist = list(Rest_Forage_Travel_int = "cat3"), 
+                   Par0 = cat_pars,
+                   stateNames = c("Rest", "Forage", "Travel"))

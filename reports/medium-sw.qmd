@@ -66,3 +66,150 @@ hmm_fit3 <- fitHMM(data = dive_prepped,
                    stateNames = c("Rest", "Forage", "Travel"))
 hmm_fit3
 ```
+
+Now fitting the 3 state HMM with SW presence/absence in the dive as an environmental covariate.
+
+```{r}
+
+recording <- read_rds(here::here("output/recording_calib.rds"))
+dive_summ <- read_rds(here::here("output/processed_dive_summaries.rds"))
+
+###assign dive ids 
+find_next <- function(x, y) {
+  # Find the index of the next value in y following x
+  approx(y, 
+         seq_along(y),
+         method = "constant",
+         f = 1, 
+         rule = 2,
+         xout = x)$y
+}
+
+clicks_by_dive <- read_csv(here::here("data/sw/clicks_by_dive.csv")) %>% 
+  #trying to connect recording with the correct dive id 
+  mutate(end_calib = recording$end_calib[-nrow(recording)],
+         dive_id = dive_summ$dive_id[find_next(end_calib, dive_summ$end)], 
+         sw_yn = sw_yn == "y") %>% 
+  select(-c(clickmanual_complete, buzz, notes)) %>% 
+  left_join(select(dive_type, dive_id, Rest_Forage_Travel_int, ID),
+            by = "dive_id")
+
+dive_sw_prepped <- prepData(clicks_by_dive, 
+                            coordNames = NULL)
+
+# Fit HMM w sw as a covariate
+hmm_fit3_sw <- fitHMM(data = dive_sw_prepped,
+                      nbStates = nbStates,
+                      formula = ~ sw_yn,
+                      dist = list(Rest_Forage_Travel_int = "cat3"), 
+                      Par0 = cat_pars,
+                      fixPar = list(beta = matrix(
+                        c(NA, NA, NA, NA, NA, NA,
+                          NA,  0, NA,  0,  0,  0),
+                        nrow = 2, byrow = TRUE
+                      )),
+                      stateNames = c("Rest", "Forage", "Travel"))
+
+hmm_fit3_sw
+
+ci <- CIbeta(hmm_fit3_sw, alpha = 0.05)
+ci$beta  # coefficients, SEs, and 95% CIs for each transition
+#some NAs for transitions where probabilities were constrained near 0. 
+
+beta_table <- bind_cols(
+  as.data.frame.table(ci$beta$est,   
+                      responseName = "est"),
+  as.data.frame.table(ci$beta$se,    
+                      responseName = "se") %>%  
+    select(se),
+  as.data.frame.table(ci$beta$lower, 
+                      responseName = "lower") %>% 
+    select(lower),
+  as.data.frame.table(ci$beta$upper, 
+                      responseName = "upper") %>%  
+    select(upper)
+) %>% 
+  rename(parameter = Var1, transition = Var2) 
+
+library(kableExtra)
+beta_table %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3))) %>% #round to 3 places
+kable(col.names = c("Parameter", "Transition", "Estimate", "SE", "Lower 95%", "Upper 95%"),
+        caption = "Beta coefficients") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover")) 
+```
+
+If the CI excludes zero, the covariate effect on that transition is significant.
+
+```{r}
+
+# dive_sw_prepped %>%
+#   mutate(state = Rest_Forage_Travel_int,
+#          next_state = lead(Rest_Forage_Travel_int)) %>% 
+#   count(state, next_state, sw_yn) %>% 
+#   drop_na(next_state) %>% 
+#   group_by(state, sw_yn) %>% 
+#   mutate(freq = n / sum(n)) %>% 
+#   ungroup() %>% 
+#   arrange(state, sw_yn, next_state) %>% 
+#   filter(next_state == 2) %>% 
+#   view()
+
+p <- ggplot(dive_sw_prepped, aes(start_time, Rest_Forage_Travel_int)) +
+  geom_line() +
+  geom_point(aes(color = sw_yn, group = dive_id))
+plotly::ggplotly(p, dynamicTicks = TRUE)
+
+```
+
+Are there differences in the dive characteristics when sw are present?
+
+```{r}
+
+dive_sw_prepped %>% 
+  group_by(Rest_Forage_Travel_int, sw_yn) %>% 
+  summarize(dur_mean = mean(duration_min),
+            dur_sd = sd(duration_min),
+            .groups = "drop") %>% 
+  mutate(sw_yn = ifelse(sw_yn, "sw_present", "sw_absent")) %>% 
+  pivot_wider(names_from = sw_yn, values_from = c(dur_mean, dur_sd)) 
+
+library(nlme)
+# Limit analysis to foraging dives 10+ minutes long
+foraging_dives <- dive_sw_prepped %>% 
+  filter(duration_min >= 10, 
+         Rest_Forage_Travel_int == 2) %>% 
+  mutate(hours_elapsed = as.numeric(start_time - start_time[1], unit = "hours"))
+dive_dur <- gls(duration_min ~ sw_yn, 
+                foraging_dives,
+                correlation = corCAR1(form = ~ hours_elapsed))
+summary(dive_dur)
+
+# binned ACF for each model
+irreg_acf <- function(mod) {
+  r <- residuals(mod, type = "normalized")
+  t <- foraging_dives$hours_elapsed
+  
+  pairs <- expand_grid(i = seq_along(r), j = seq_along(r)) %>% 
+    filter(j > i) %>% 
+    mutate(lag = abs(t[i] - t[j]),
+           prod = r[i] * r[j]) %>% 
+    filter(lag <= 24)
+  
+  bin_width = 0.5
+  pairs %>% 
+    mutate(lag_bin = floor(lag / bin_width) * bin_width + bin_width / 2) %>% 
+    group_by(lag_bin) %>% 
+    summarize(acf = mean(prod), n = n()) %>% 
+    slice(-n()) %>% 
+    ggplot(aes(lag_bin, acf)) +
+    geom_hline(yintercept = 0 ) +
+    geom_hline(yintercept = c(-1.96, 1.96) / sqrt(length(t)),
+               linetype = "dashed", color = "blue") +
+    geom_col()
+}
+irreg_acf(dive_dur)
+
+```
+
+Dive duration is on average 1-2 mins longer when sperm whales are present.
