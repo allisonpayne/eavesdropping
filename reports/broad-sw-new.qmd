@@ -173,3 +173,95 @@ p_sw <- plot(fit, type = 3)$H391 +
 
 cowplot::plot_grid(track_overlap_sw, p_sw, ncol = 2, rel_widths = c(2, 5))
 ```
+
+Look at the change in the mean of SW detections over time using a breakpoint model.
+
+```{r}
+#| label: sw-change
+
+library(changepoint)
+sw_cpt <- cpt.mean(acou_agg_valid$SW, method = "AMOC")
+breakpoint_date <- acou_agg_valid$date[sw_cpt@cpts[1]]
+sw_segs <- tibble(
+  seg_start = acou_agg_valid$date[c(1, sw_cpt@cpts[1])],
+  seg_end = acou_agg_valid$date[c(sw_cpt@cpts[1], nrow(acou_agg_valid))],
+  seg_mean = sw_cpt@param.est$mean
+)
+
+ggplot(acou_agg_valid, aes(x = date, y = SW)) +
+  geom_point(alpha = 0.4) +
+  geom_segment(aes(x = seg_start, xend = seg_end, y = seg_mean, yend = seg_mean),
+               sw_segs,
+               linetype = "dashed",
+               color = "hotpink",
+               linewidth = 1.2) +
+  geom_vline(xintercept = breakpoint_date, 
+             linetype = "dotted", 
+             color = "hotpink", 
+             linewidth = 1.2) +
+  labs(x = NULL, y = "SW detections") +
+  theme_classic()
+```
+
+Compare to a breakpoint model for the mixed layer temperature.
+
+```{r}
+#| label: mlt-mod
+
+#mixed layer temperature - using average MLT and minimum temperature from this file
+mlt <- read_csv(here::here("data/23A1302/out-MixLayer.csv"))
+mlt <- mlt %>% 
+  mutate(date = as.POSIXct(Date, 
+                        format = "%H:%M:%S %d-%b-%Y", 
+                        tz = "UTC"),
+         date_num = as.numeric(date - date[1], unit = "days"),
+         id = "H391") %>% 
+   filter(between(date, 
+                  first(acou_agg_valid$date2), 
+                  last(acou_agg_valid$date)))
+
+# There's one clear outlier in MLT temperature, remove it and interpolate
+outlier_idx <- which(mlt$MLTave > 14)
+mlt$MLTave[outlier_idx] <- mean(mlt$MLTave[outlier_idx + c(-1, 1)])
+mlt$MLTave_std <- (mlt$MLTave - mean(mlt$MLTave)) / sd(mlt$MLTave)
+
+mlt_cpt <- cpt.reg(cbind(mlt$MLTave, 1, mlt$date_num), method = "AMOC")
+mlt_cpt_date <- mlt$date[mlt_cpt@cpts[1]]
+b <- param.est(mlt_cpt)$beta
+mlt_segs <- tibble(
+  date = mlt$date[c(1, mlt_cpt@cpts[1], mlt_cpt@cpts[1], nrow(mlt))],
+  date_num = as.numeric(date - mlt$date[1], unit = "days"),
+  seg_num = c(1, 1, 2, 2),
+  MLTave = c(b[1, 1] + b[1, 2] * date_num[1],
+             b[1, 1] + b[1, 2] * date_num[2],
+             b[2, 1] + b[2, 2] * date_num[3],
+             b[2, 1] + b[2, 2] * date_num[4])
+)
+
+ggplot(mlt, aes(x = date, y = MLTave)) +
+  geom_point(alpha = 0.4) +
+  geom_line(aes(group = seg_num), 
+            mlt_segs, 
+            linetype = "dashed",
+            color = "firebrick",
+            linewidth = 1.2) +
+  geom_vline(xintercept = mlt_cpt_date, 
+             linetype = "dotted", 
+             color = "firebrick", 
+             linewidth = 1.2) +
+  labs(x = NULL, y = "Average Mixed layer temp") +
+  theme_classic()
+```
+
+```{r}
+p1 +
+  geom_vline(xintercept = breakpoint_date, 
+             linetype = "dashed", 
+             color = "hotpink",
+             linewidth = 1.2) +
+  geom_vline(xintercept = mlt_cpt_date, 
+             linetype = "dashed", 
+             color = "firebrick",
+             linewidth = 1.2)
+
+```
