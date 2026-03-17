@@ -35,6 +35,17 @@ summarize_dives <- function(dives, min_duration_min = 5) {
       bottom_depth_range = ifelse(any(at_bottom),
                                   max(Depth[at_bottom]) - min(Depth[at_bottom]),
                                   NA),
+      descent_rate_ms = {
+        depth_thresh <- 0.8 * max(Depth)
+        descent_idx <- which(Depth <= depth_thresh & Date <= Date[which.max(Depth)[1]])
+        if (length(descent_idx) >= 2) {
+          descent_depth <- Depth[descent_idx]
+          descent_time <- as.numeric(difftime(Date[descent_idx], Date[descent_idx[1]], units = "secs"))
+          coef(lm(descent_depth ~ descent_time))[2]
+        } else {
+          NA_real_
+        }
+      },
       .groups = "drop") %>%
     filter(duration_min > min_duration_min)
 }
