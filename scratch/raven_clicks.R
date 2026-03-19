@@ -1,5 +1,7 @@
 library(tidyverse)
 source(here::here("R/find_next.R"))
+source(here::here("R/non_recording.R"))
+theme_set(theme_bw())
 
 clicks_0227_paths <- dir("data/sw/manual_clicks/", full.names = TRUE) %>% 
   #just get feb 27 for now
@@ -15,26 +17,13 @@ clicks_0227 <- map_dfr(clicks_0227_paths, \(click_path) {
            click_path = click_path)
 })
 
-clicks_freq_adj <- clicks_0227 %>% 
-  mutate(`Low Freq (Hz)` = 3000, 
-         `High Freq (Hz)` = 30000) %>% 
-  select(-c(filename, `Avg Power Density (dB FS/Hz)`, `Peak Freq (Hz)`)) 
-
-clicks_freq_adj %>% 
-  group_by(click_path) %>% 
-  group_walk(\(dat, group) {
-    write_delim(dat, 
-                file = file.path(group$click_path), 
-                delim = "\t")
-  })
-
-write_delim(clicks_freq_adj)
-
 dive_summ <- read_rds(here::here("output/processed_dive_summaries.rds"))
 dives <- read_rds(here::here("output/processed_dives.rds"))
 recording <- read_rds(here::here("output/recording_calib.rds")) 
 recording <- recording %>% 
   mutate(recording_id = c(1:nrow(recording)))
+non_recording <- calculate_non_recording(recording) %>% 
+  filter(gap_end <= last(recording$end_calib))
 
 recording_0227 <- recording %>% 
   filter(filename %in% clicks_0227$filename) %>% 
@@ -49,30 +38,68 @@ recording_0227 <- recording %>%
                                    units = "secs"))) %>% 
   ungroup()
 
-
-
-recording_0227 %>% 
-  group_by(dive_id) %>%
-  ggplot(aes(click_start, ici)) +
-  geom_point() + 
-  ylim(0, 2)
-
-pf_plot <- recording_0227 %>%
-  group_by(dive_id) %>% 
-  summarize(max_peak_freq = quantile(PeakFreq, .95), 
-            median_click = median(click_start), 
-            n = n()) %>% 
-  ggplot(aes(median_click, max_peak_freq)) +
-  geom_point(alpha = 0.5) + 
-  geom_smooth(aes(weight = n), se = FALSE)
-
-
-rl_plot <- recording_0227 %>% 
+recording_summ <- recording_0227 %>% 
   group_by(dive_id) %>% 
   summarize(max_rl = quantile(RL, .95), 
-            median_click = median(click_start)) %>% 
+            mean_pf = mean(PeakFreq), 
+            count = n(),
+            median_click = median(click_start))
+
+recording_0227 %>%
+  group_by(dive_id) %>% 
+  mutate(n_clicks = n()) %>% 
+  ggplot(aes(click_start, PeakFreq, group = dive_id)) +
+  geom_point(alpha = 0.2, fill = "gray") + 
+  geom_boxplot(alpha = 0.7) +
+  geom_rect(data = non_recording, 
+            aes(xmin = gap_start, 
+                xmax = gap_end, 
+                ymin = -Inf, 
+                ymax = Inf), 
+            fill = "gray30", 
+            alpha = 0.5, 
+            inherit.aes = FALSE) + 
+  scale_x_datetime(limits = range(recording_summ$median_click))
+
+pf_plot <- recording_summ %>%
+  ggplot(aes(median_click, mean_pf)) +
+  geom_point(alpha = 0.5) + 
+  geom_rect(data = non_recording, 
+            aes(xmin = gap_start, 
+                xmax = gap_end, 
+                ymin = -Inf, 
+                ymax = Inf), 
+            fill = "gray30", 
+            alpha = 0.5, 
+            inherit.aes = FALSE) + 
+  geom_smooth(se = FALSE) +
+  scale_x_datetime(limits = range(recording_summ$median_click))
+
+rl_plot <- recording_summ %>% 
   ggplot(aes(median_click, max_rl)) +
   geom_point(alpha = 0.5) +
-  geom_smooth(se = FALSE) 
+  geom_rect(data = non_recording, 
+            aes(xmin = gap_start, 
+                xmax = gap_end, 
+                ymin = -Inf, 
+                ymax = Inf), 
+            fill = "gray30", 
+            alpha = 0.5, 
+            inherit.aes = FALSE) + 
+  geom_smooth(se = FALSE) +
+  scale_x_datetime(limits = range(recording_summ$median_click)) + 
+  labs(x = "Time", 
+       y = "Received level (dB)")
 
-cowplot::plot_grid(pf_plot, rl_plot, nrow = 2)
+dive_plot <- dives %>% 
+  filter(Date >= first(recording_summ$median_click), 
+         Date <= last(recording_summ$median_click)) %>% 
+  ggplot(aes(Date, Depth)) + 
+  geom_path() + 
+  scale_y_reverse() + 
+  scale_x_datetime(limits = range(recording_summ$median_click)) %>% 
+  labs(x = NULL)
+
+cowplot::plot_grid(dive_plot, rl_plot, nrow = 2)
+
+
