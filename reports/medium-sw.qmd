@@ -15,9 +15,12 @@ First, read in and prep the data.
 #| label: setup
 #| message: false
 
-library(momentuHMM)
 library(tidyverse)
 source(here::here("R/dives.R"))
+source(here::here("R/find_next.R"))
+
+recording <- read_rds(here::here("output/recording_calib.rds"))
+dive_summ <- read_rds(here::here("output/processed_dive_summaries.rds"))
 
 #read in dive type data (done manually)
 dive_type <- read_csv(here::here("data/manual-dive-type.csv")) %>% 
@@ -29,16 +32,16 @@ dive_type <- read_csv(here::here("data/manual-dive-type.csv")) %>%
          Rest_Forage_Travel_int = unclass(factor(Rest_Forage_Travel, 
                                                  levels = c("Rest", 
                                                             "Forage",
-                                                            "Travel"))))
+                                                            "Travel")))) 
 
-dive_prepped <- prepData(data = dive_type, 
-                         coordNames = NULL)
-```
-
-```{r}
-
-recording <- read_rds(here::here("output/recording_calib.rds"))
-dive_summ <- read_rds(here::here("output/processed_dive_summaries.rds"))
+clicks_by_dive <- read_csv(here::here("data/sw/clicks_by_dive.csv")) %>% 
+  #connect recording with the correct dive id 
+  mutate(end_calib = recording$end_calib[-nrow(recording)],
+         dive_id = dive_summ$dive_id[find_next(end_calib, dive_summ$end)], 
+         sw_yn = sw_yn == "y") %>% 
+  select(-c(clickmanual_complete, buzz, notes)) %>% 
+  left_join(select(dive_type, dive_id, Rest_Forage_Travel_int, ID),
+            by = "dive_id") 
 
 ```
 
@@ -46,12 +49,13 @@ Are there differences in the dive characteristics when sw are present?
 
 ```{r}
 library(nlme)
+
 # Limit analysis to foraging dives 10+ minutes long
-foraging_dives <- dive_sw_prepped %>% 
+foraging_dives <- clicks_by_dive %>% 
   filter(duration_min >= 10, 
          Rest_Forage_Travel_int == 2) %>% 
   mutate(hours_elapsed = as.numeric(start_time - start_time[1], unit = "hours")) %>% 
-  left_join(select(dive_summ, dive_id, descent_rate_ms), by = "dive_id")
+  left_join(select(dive_summ, dive_id), by = "dive_id")
 
 # dive duration model
 dive_dur <- gls(duration_min ~ sw_yn, 
@@ -59,11 +63,6 @@ dive_dur <- gls(duration_min ~ sw_yn,
                 correlation = corCAR1(form = ~ hours_elapsed))
 summary(dive_dur)
 
-# Descent rate model
-desc_rate <- gls(descent_rate_ms ~ sw_yn + hours_elapsed, 
-                 foraging_dives,
-                 correlation = corCAR1(form = ~ hours_elapsed))
-summary(desc_rate)
 
 # For comparison purposes only, our (incorrect) estimates using ols
 dive_dur_lm <- lm(duration_min ~ sw_yn, foraging_dives)
@@ -103,3 +102,35 @@ intervals(dive_dur)
 ```
 
 Dive duration is on average 1-2 mins longer when sperm whales are present.
+
+```{r}
+foraging_dives %>% 
+  ggplot(aes(x = sw_yn, y = duration_min)) +
+  geom_jitter(color = "gray40", alpha = 0.1) +
+  geom_boxplot(alpha = 0.7) +
+  labs(x = "Sperm whales present", 
+       y = "Foraging dive duration (mins)") + 
+  theme_minimal()
+```
+
+```{r}
+daily_dives <- dive_summ %>% 
+  left_join(dive_type, by = "dive_id") %>% 
+  drop_na(Rest_Forage_Travel_int) %>% 
+  mutate(date = as_date(start)) %>% 
+  group_by(date, Rest_Forage_Travel) %>% 
+  summarize(count = n(), .groups = "drop_last") %>% 
+  mutate(prop = count / sum(count)) %>% 
+  ungroup()
+daily_dives %>% 
+  ggplot(aes(date, prop, fill = Rest_Forage_Travel)) +
+  geom_col() + 
+  scale_fill_manual(values = c("Rest" = "turquoise3", 
+                               "Forage" = "orange", 
+                               "Travel" = "lightgoldenrod"
+  )) +
+  labs(x = NULL, 
+       y = "Proportion of dives", 
+       fill = "Behavior") + 
+  theme_minimal()
+```

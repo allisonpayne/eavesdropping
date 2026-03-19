@@ -24,9 +24,7 @@ dives <- get_dives(depth, 5, 80)
 
 ```
 
-Next, load in the acoustic data. We have two kinds of acoustic data: manual annotations of sperm whale bouts, and triton-detected sperm whale clicks (aka, TPWS). We want to compare them and make sure they look similar.
-
-**to-do: update the manual annotations, they are newly validated.**
+Next, load in the acoustic data. We have two kinds of acoustic data: manual annotations of sperm whale bouts, and triton-detected sperm whale clicks. We want to compare them and make sure they look similar.
 
 ```{r}
 source(here::here("R/broad_funcs.R"))
@@ -136,4 +134,8 @@ bout_plots
 #             height = 6,
 #             units = "in"
 #     ))
+```
+
+```{r}
+
 ```

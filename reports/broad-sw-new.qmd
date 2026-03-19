@@ -14,6 +14,10 @@ library(tidyverse)
 library(terra)
 library(tidyterra)
 library(argosfilter)
+library(marmap)      # ETOPO1 bathymetry
+library(metR)        # geom_contour_fill 
+library(rnaturalearth)
+library(rnaturalearthdata)
 
 theme_set(theme_bw())
 ```
@@ -77,10 +81,65 @@ On average, we got a filtered location every `r avg_loc_timing$mean_interval_hrs
 ```{r}
 #| label: plot-track-initial
 
-track_overlap %>%
-  ggplot(aes(Longitude, Latitude)) +
-  geom_path() 
+bathy <- getNOAA.bathy(
+  lon1 = -126, lon2 = -122, 
+  lat1 = 35, lat2 = 45, 
+  resolution = 2, 
+  keep = TRUE
+)
+bathy_df <- fortify(bathy)
+isobaths <- c(-200, -500, -1000, -2000, -4000) 
 
+land <- ne_countries(scale = "medium", returnclass = "sf")
+states <- ne_states(country = "united states of america", returnclass = "sf") 
+
+track_map <- ggplot() + 
+  #bathymetry
+  geom_raster(data = filter(bathy_df, z <= 0), 
+              aes(x, y, fill = z), 
+              interpolate = TRUE) + 
+  scale_fill_gradientn(
+    colours  = c("#08306b", "#2171b5", "#6baed6", "#c6dbef"),
+    values   = scales::rescale(c(-6000, -2000, -200, 0)),
+    name     = "Depth (m)",
+    na.value = "grey80"
+  ) +
+  # Land + state borders
+  geom_sf(data = land,
+          fill = "grey75",
+          colour = NA) +
+  geom_sf(data = states, 
+          fill = NA, 
+          colour = "grey60", 
+          linewidth = 0.2) +  
+  coord_sf(
+    xlim   = c(-126, -122),
+    ylim   = c(37, 44),
+    expand = FALSE
+  ) + 
+  scale_x_continuous(breaks = seq(-126, -122, by = 2)) +
+  # Isobath contours
+  geom_contour(
+    data    = bathy_df,
+    aes(x, y, z = z),
+    breaks  = isobaths,
+    colour  = "white", linewidth = 0.25, alpha = 0.6
+  ) + 
+  #Entire track
+  geom_path(data = track_filtered, 
+            aes(Longitude, Latitude), 
+            color = "goldenrod", 
+            alpha = .5) + 
+  labs(x = "Longitude", 
+       y = "Latitude") +
+  # Track with recording
+  geom_path(data = track_overlap, 
+            aes(Longitude, Latitude), 
+            color = "gold") + 
+  labs(x = "Longitude", 
+       y = "Latitude") + 
+  theme_minimal()
+track_map
 ```
 
 Format track data for `aniMotum`.
@@ -107,7 +166,7 @@ fit <- fit_ssm(track_formatted,
                time.step = 6,
                control = ssm_control(verbose = 0))
 
-summary(fit)
+# summary(fit)
 p1 <- plot(fit, type = 3)$H391
 p2 <- ggplot(grab(fit, as_sf = TRUE)) + 
   geom_sf(aes(color = g)) +
@@ -156,12 +215,18 @@ track_overlap_sw <- track_overlap %>%
     acou_agg_valid %>% select(date2, SW),
     join_by(closest(Date >= date2))
   ) %>% 
-  rename(sw = SW) %>%
-  ggplot(aes(Longitude, Latitude)) +
-  geom_path() +
-  geom_point(aes(color = sw)) +
-  scale_color_viridis_c(option = "inferno")
+  rename(sw = SW) 
 
+sw_track_map <- track_map + 
+  geom_point(data = track_overlap_sw, 
+             aes(Longitude, Latitude, size = sw), 
+             color = "hotpink", 
+             alpha = .3) + 
+  scale_size_area(name = "Hours of SW", 
+                  max_size = 4, 
+                  breaks = c(0, 2, 4, 6))
+
+sw_track_map
 ```
 
 Plot movement persistence with SW presence (just for visualization purposes).
@@ -188,7 +253,7 @@ sw_segs <- tibble(
   seg_mean = sw_cpt@param.est$mean
 )
 
-ggplot(acou_agg_valid, aes(x = date, y = SW)) +
+sw_cpt_plot <- ggplot(acou_agg_valid, aes(x = date, y = SW)) +
   geom_point(alpha = 0.4) +
   geom_segment(aes(x = seg_start, xend = seg_end, y = seg_mean, yend = seg_mean),
                sw_segs,
@@ -201,6 +266,8 @@ ggplot(acou_agg_valid, aes(x = date, y = SW)) +
              linewidth = 1.2) +
   labs(x = NULL, y = "SW detections") +
   theme_classic()
+
+sw_cpt_plot
 ```
 
 Compare to a breakpoint model for the mixed layer temperature.
@@ -238,7 +305,7 @@ mlt_segs <- tibble(
              b[2, 1] + b[2, 2] * date_num[4])
 )
 
-ggplot(mlt, aes(x = date, y = MLTave)) +
+mlt_cpt_plot <- ggplot(mlt, aes(x = date, y = MLTave)) +
   geom_point(alpha = 0.4) +
   geom_line(aes(group = seg_num), 
             mlt_segs, 
@@ -251,17 +318,82 @@ ggplot(mlt, aes(x = date, y = MLTave)) +
              linewidth = 1.2) +
   labs(x = NULL, y = "Average Mixed layer temp") +
   theme_classic()
+
+cowplot::plot_grid(sw_cpt_plot, mlt_cpt_plot, nrow = 2)
 ```
 
 ```{r}
-p1 +
+p_mp_cpt <- p1 +
   geom_vline(xintercept = breakpoint_date, 
              linetype = "dashed", 
-             color = "hotpink",
+             color = "deeppink",
              linewidth = 1.2) +
+  geom_text(aes(x = breakpoint_date, y = 1, label = "SW", hjust = 1.5)) + 
   geom_vline(xintercept = mlt_cpt_date, 
              linetype = "dashed", 
-             color = "firebrick",
-             linewidth = 1.2)
+             color = "darkblue",
+             linewidth = 1.2) +
+  geom_text(aes(x = mlt_cpt_date, y = 1, label = "MLT", hjust = 1.5))
 
+
+```
+
+Show the MP plot with dive behavior below.
+
+```{r}
+dive_summ <- read_rds(here::here("output/processed_dive_summaries.rds"))
+dive_type <- read_csv(here::here("data/manual-dive-type.csv")) %>% 
+  select(-c(AcousticsUsed, Notes)) %>% 
+  mutate(ID = 1,
+         Benthic_Pelagic_int = unclass(factor(Benthic_Pelagic, 
+                                              levels = c("Benthic", 
+                                                         "Pelagic"))),
+         Rest_Forage_Travel_int = unclass(factor(Rest_Forage_Travel, 
+                                                 levels = c("Rest", 
+                                                            "Forage",
+                                                            "Travel")))) 
+
+daily_dives <- dive_summ %>% 
+  left_join(dive_type, by = "dive_id") %>% 
+  drop_na(Rest_Forage_Travel_int) %>% 
+  mutate(date = as_date(start)) %>% 
+  group_by(date, Rest_Forage_Travel) %>% 
+  summarize(count = n(), .groups = "drop_last") %>% 
+  mutate(prop = count / sum(count)) %>% 
+  ungroup()
+
+p_divetype <- daily_dives %>% 
+  ggplot(aes(date, prop, fill = Rest_Forage_Travel)) +
+  geom_bar(stat = "identity", width = 0.8) + 
+  scale_fill_manual(values = c("Rest" = "#1f78b4", 
+                               "Forage" = "#a6cee3", 
+                               "Travel" = "#b2df8a"
+  )) +
+  geom_vline(xintercept = as_date(breakpoint_date), 
+             linetype = "dashed", 
+             color = "deeppink",
+             linewidth = 1.2) +
+  geom_text(aes(x = as_date(breakpoint_date), y = 1, label = "SW"), hjust = 1.5) + 
+  geom_vline(xintercept = as_date(mlt_cpt_date), 
+             linetype = "dashed", 
+             color = "darkblue",
+             linewidth = 1.2) +
+  geom_text(aes(x = as_date(mlt_cpt_date), y = 1, label = "MLT"), hjust = 1.5) +
+  labs(x = NULL, 
+       y = "Proportion of dives", 
+       fill = "Behavior") + 
+  theme_minimal()
+
+cowplot::plot_grid(p_mp_cpt, p_divetype, nrow = 2, align ="h")
+
+# library(gtable)
+# library(grid)
+# library(gridExtra)
+# 
+# g1 <- ggplotGrob(p_mp_cpt)
+# g2 <- ggplotGrob(p_divetype)
+# 
+# g2$widths <- g1$widths
+# 
+# grid.arrange(g1, g2, ncol = 1)
 ```
