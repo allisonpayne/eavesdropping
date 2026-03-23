@@ -347,7 +347,7 @@ p_mp_cpt <- p1 +
 
 ```
 
-Show the MP plot with dive behavior below.
+Finally, a changepoint model for benthic vs pelagic dives.
 
 ```{r}
 dive_summ <- read_rds(here::here("output/processed_dive_summaries.rds"))
@@ -362,10 +362,29 @@ dive_type <- read_csv(here::here("data/manual-dive-type.csv")) %>%
                                                             "Forage",
                                                             "Travel")))) 
 
+dive_type_cpt <- dive_summ %>% 
+  left_join(dive_type, by = "dive_id") %>% 
+    drop_na(Benthic_Pelagic_int) %>% 
+    mutate(date = as_date(start))
+
+bp_cpt <- cpt.mean(dive_type_cpt$Benthic_Pelagic_int, method = "AMOC")
+bp_cpt_date <- dive_type_cpt$date[bp_cpt@cpts[1]]
+
+first(dive_type_cpt$date) - bp_cpt_date
+last(dive_type_cpt$date) - bp_cpt_date
+sum(dive_type_cpt$date < bp_cpt_date)
+sum(dive_type_cpt$date > bp_cpt_date)
+
+```
+
+Show the MP plot with dive behavior below.
+
+```{r}
+
 daily_dives <- dive_summ %>% 
   left_join(dive_type, by = "dive_id") %>% 
   drop_na(Rest_Forage_Travel_int) %>% 
-  mutate(date = as_date(start)) %>% 
+  mutate(date = lubridate::as_date(start)) %>% 
   group_by(date, Rest_Forage_Travel) %>% 
   summarize(count = n(), .groups = "drop_last") %>% 
   mutate(prop = count / sum(count)) %>% 
