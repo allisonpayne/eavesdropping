@@ -50,7 +50,7 @@ recording_0227 %>%
   mutate(n_clicks = n()) %>% 
   ggplot(aes(click_start, PeakFreq, group = dive_id)) +
   geom_point(alpha = 0.2, fill = "gray") + 
-  geom_boxplot(alpha = 0.7) +
+  # geom_boxplot(alpha = 0.7) +
   geom_rect(data = non_recording, 
             aes(xmin = gap_start, 
                 xmax = gap_end, 
@@ -77,7 +77,11 @@ pf_plot <- recording_summ %>%
 
 rl_plot <- recording_summ %>% 
   ggplot(aes(median_click, max_rl)) +
-  geom_point(alpha = 0.5) +
+  geom_point(color = "hotpink", size = 3) +
+  geom_point(data = recording_0227, 
+             aes(x = click_start, y = RL), 
+             alpha = 0.2, 
+             inherit.aes = FALSE) +
   geom_rect(data = non_recording, 
             aes(xmin = gap_start, 
                 xmax = gap_end, 

@@ -7,8 +7,6 @@ execute:
   warning: false
 ---
 
-Use `momentuHMM` to fit a Hidden Markov Model to the dive data.
-
 First, read in and prep the data.
 
 ```{r}
@@ -16,6 +14,7 @@ First, read in and prep the data.
 #| message: false
 
 library(tidyverse)
+library(nlme)
 source(here::here("R/dives.R"))
 source(here::here("R/find_next.R"))
 
@@ -39,7 +38,7 @@ clicks_by_dive <- read_csv(here::here("data/sw/clicks_by_dive.csv")) %>%
   mutate(end_calib = recording$end_calib[-nrow(recording)],
          dive_id = dive_summ$dive_id[find_next(end_calib, dive_summ$end)], 
          sw_yn = sw_yn == "y") %>% 
-  select(-c(clickmanual_complete, buzz, notes)) %>% 
+  select(-c(clickmanual_complete, buzz, notes, duration_min, duration_sec)) %>% 
   left_join(select(dive_type, dive_id, Rest_Forage_Travel_int, ID),
             by = "dive_id") 
 
@@ -48,25 +47,21 @@ clicks_by_dive <- read_csv(here::here("data/sw/clicks_by_dive.csv")) %>%
 Are there differences in the dive characteristics when sw are present?
 
 ```{r}
-library(nlme)
-
-# Limit analysis to foraging dives 10+ minutes long
-foraging_dives <- clicks_by_dive %>% 
-  filter(duration_min >= 10, 
-         Rest_Forage_Travel_int == 2) %>% 
+model_dives <- clicks_by_dive %>% 
+  # filter(Rest_Forage_Travel_int == 2) %>% 
   mutate(hours_elapsed = as.numeric(start_time - start_time[1], unit = "hours")) %>% 
-  left_join(select(dive_summ, dive_id), by = "dive_id")
+  left_join(select(dive_summ, 
+                   dive_id, 
+                   bottom_duration_min, 
+                   duration_min,
+                   descent_rate_ms), 
+            by = "dive_id")
 
 # dive duration model
-dive_dur <- gls(duration_min ~ sw_yn, 
-                foraging_dives,
-                correlation = corCAR1(form = ~ hours_elapsed))
-summary(dive_dur)
-
-
-# For comparison purposes only, our (incorrect) estimates using ols
-dive_dur_lm <- lm(duration_min ~ sw_yn, foraging_dives)
-summary(dive_dur_lm)
+bottom_dur <- gls(bottom_duration_min ~ sw_yn, 
+                  model_dives,
+                  correlation = corCAR1(form = ~ hours_elapsed))
+summary(bottom_dur)
 
 # binned ACF for each model
 irreg_acf <- function(mod) {
@@ -74,7 +69,7 @@ irreg_acf <- function(mod) {
                  type = ifelse(is(mod, "gls"), 
                                "normalized",
                                "pearson"))
-  t <- foraging_dives$hours_elapsed
+  t <- model_dives$hours_elapsed
   
   pairs <- expand_grid(i = seq_along(r), j = seq_along(r)) %>% 
     filter(j > i) %>% 
@@ -95,21 +90,40 @@ irreg_acf <- function(mod) {
     geom_col()
 }
 #irreg_acf(dive_dur_lm)
-irreg_acf(dive_dur)
+irreg_acf(bottom_dur)
+intervals(bottom_dur)
 
-intervals(dive_dur)
+# descent rate model
+desc_rate <- gls(descent_rate_ms ~ sw_yn, 
+                model_dives,
+                correlation = corCAR1(form = ~ hours_elapsed))
+summary(desc_rate)
 
+# binned ACF for each model
+irreg_acf(desc_rate)
+intervals(desc_rate)
+
+# total duration rate model
+total_dur <- gls(duration_min ~ sw_yn, 
+                model_dives,
+                correlation = corCAR1(form = ~ hours_elapsed))
+summary(total_dur)
+
+# binned ACF for each model
+irreg_acf(total_dur)
+intervals(total_dur)
 ```
 
 Dive duration is on average 1-2 mins longer when sperm whales are present.
 
 ```{r}
-foraging_dives %>% 
-  ggplot(aes(x = sw_yn, y = duration_min)) +
+model_dives %>% 
+  ggplot(aes(x = sw_yn, 
+             y = bottom_duration_min)) +
   geom_jitter(color = "gray40", alpha = 0.1) +
   geom_boxplot(alpha = 0.7) +
   labs(x = "Sperm whales present", 
-       y = "Foraging dive duration (mins)") + 
+       y = "Dive bottom time (mins)") + 
   theme_minimal()
 ```
 

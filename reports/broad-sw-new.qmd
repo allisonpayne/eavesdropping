@@ -163,7 +163,7 @@ track_formatted <- track_overlap %>%
 fit <- fit_ssm(track_formatted, 
                vmax = 3, #max travel rate 
                model = "mp", #fits correlated random walk
-               time.step = 6,
+               time.step = 3,
                control = ssm_control(verbose = 0))
 
 # summary(fit)
@@ -187,7 +187,7 @@ sw_valid <- read_csv(here::here("data/sw/SWCombBouts_Validated.csv"),
          duration = end - start) %>% 
   select(-notes)
 
-window_hr <- 6
+window_hr <- 3
 acou_agg_valid <- tibble(date = seq(first(recording$start), 
                                     last(recording$end), 
                                     by = window_hr * 3600)) %>% 
@@ -253,6 +253,10 @@ sw_segs <- tibble(
   seg_mean = sw_cpt@param.est$mean
 )
 
+sw_segs$seg_end - sw_segs$seg_start
+sum(acou_agg_valid$date < breakpoint_date)
+sum(acou_agg_valid$date > breakpoint_date)
+
 sw_cpt_plot <- ggplot(acou_agg_valid, aes(x = date, y = SW)) +
   geom_point(alpha = 0.4) +
   geom_segment(aes(x = seg_start, xend = seg_end, y = seg_mean, yend = seg_mean),
@@ -304,6 +308,11 @@ mlt_segs <- tibble(
              b[2, 1] + b[2, 2] * date_num[3],
              b[2, 1] + b[2, 2] * date_num[4])
 )
+
+mlt_cpt_date - mlt_segs$date[1]
+mlt_cpt_date - mlt_segs$date[4]
+sum(mlt$date < mlt_cpt_date)
+sum(mlt$date > mlt_cpt_date)
 
 mlt_cpt_plot <- ggplot(mlt, aes(x = date, y = MLTave)) +
   geom_point(alpha = 0.4) +
@@ -386,14 +395,73 @@ p_divetype <- daily_dives %>%
 
 cowplot::plot_grid(p_mp_cpt, p_divetype, nrow = 2, align ="h")
 
-# library(gtable)
-# library(grid)
-# library(gridExtra)
-# 
-# g1 <- ggplotGrob(p_mp_cpt)
-# g2 <- ggplotGrob(p_divetype)
-# 
-# g2$widths <- g1$widths
-# 
-# grid.arrange(g1, g2, ncol = 1)
+```
+
+```{r}
+
+phase_transitions <- as.POSIXct(c(
+  "2000-01-01", # -Inf
+  "2025-03-03",
+  "2025-03-15",
+  "2025-04-04",
+  "2100-01-01"  # Inf
+),
+tz = "UTC")
+step_length_km <- grab(fit, what = "predicted") %>% 
+  mutate(dist_km = geosphere::distGeo(cbind(lon, lat)) / 1e3,
+         phase = cut(date, 
+                     phase_transitions, 
+                     labels = c("Outbound", "Transition", "Foraging", "Inbound"))) 
+
+step_length_km %>% 
+  group_by(phase) %>% 
+  summarize(mean_step_km = mean(dist_km, na.rm = TRUE), 
+            sd_step_km = sd(dist_km, na.rm = TRUE),
+            cv_step_km = sd_step_km / mean_step_km)
+
+step_length_km %>% 
+  ggplot(aes(date, dist_km)) +
+  geom_line() +
+  geom_point() +
+  geom_rect(aes(xmin = start,
+                xmax = end,
+                ymin = -Inf,
+                ymax = Inf),
+            sw_valid,
+            inherit.aes = FALSE,
+            color = NA,
+            fill = "pink",
+            alpha = 0.5) +
+  geom_vline(xintercept = breakpoint_date, 
+             linetype = "dashed", 
+             color = "deeppink",
+             linewidth = 1.2) +
+  geom_vline(xintercept = mlt_cpt_date, 
+             linetype = "dashed", 
+             color = "darkblue",
+             linewidth = 1.2) +
+  expand_limits(y = 0) 
+  # coord_cartesian(xlim = c(breakpoint_date - 3600 * 3,
+  #                          as.POSIXct("2025-03-15 06:00", tz = "UTC")))
+
+```
+
+```{r}
+step_length_vect <- step_length_km %>% 
+  filter(date >= as.POSIXct("2025-03-12", tz = "UTC")) %>% 
+  vect(geom = c("lon", "lat"), crs = "EPSG:4326") %>% 
+  project("+proj=tcea +lon_0=-124.7498444 +datum=WGS84 +units=m +no_defs") # Equal area proj
+
+# Spatial range
+c(x_range = ext(step_length_vect)[2] - ext(step_length_vect)[1],
+  y_range = ext(step_length_vect)[4] - ext(step_length_vect)[3]) / 1e3
+
+# centroid
+geom(step_length_vect)[, c("x", "y")] %>% 
+  colMeans() %>% 
+  t() %>% 
+  as_tibble() %>% 
+  vect(geom = c("x", "y"), crs = crs(step_length_vect)) %>%
+  project("EPSG:4326")
+
 ```
